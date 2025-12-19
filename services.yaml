@@ -1,0 +1,65 @@
+fade_to:
+  name: Fade Light
+  description: Fade a Lutron light to a specific brightness over a duration.
+  fields:
+    zone_id:
+      name: Zone ID
+      description: The Lutron zone ID of the light.
+      required: true
+      example: 28
+      selector:
+        number:
+          min: 1
+          max: 999
+    brightness:
+      name: Brightness
+      description: Target brightness (0-100).
+      required: true
+      example: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+    fade_time:
+      name: Fade Time
+      description: Duration of the fade in seconds.
+      required: false
+      default: 0
+      example: 300
+      selector:
+        number:
+          min: 0
+          max: 7200
+
+long_fade:
+  name: Long Fade
+  description: Fade a Lutron light with extended duration (useful for bedtime routines).
+  fields:
+    zone_id:
+      name: Zone ID
+      description: The Lutron zone ID of the light.
+      required: true
+      example: 28
+      selector:
+        number:
+          min: 1
+          max: 999
+    brightness:
+      name: Brightness
+      description: Target brightness (0-100).
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+    duration:
+      name: Duration
+      description: Duration of the fade in seconds (default 30 minutes).
+      required: false
+      default: 1800
+      example: 1800
+      selector:
+        number:
+          min: 0
+          max: 7200

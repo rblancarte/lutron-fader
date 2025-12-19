@@ -1,0 +1,11 @@
+{
+  "domain": "lutron_fader",
+  "name": "Lutron Fader",
+  "documentation": "https://github.com/yourusername/lutron_fader",
+  "requirements": [],
+  "codeowners": ["@yourusername"],
+  "after_dependencies": ["lutron_caseta"],
+  "version": "0.1.0",
+  "iot_class": "local_push",
+  "config_flow": false
+}

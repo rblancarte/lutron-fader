@@ -1,0 +1,40 @@
+{
+  "title": "Lutron Fader",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Lutron Fader",
+        "description": "Connect to your Lutron Caseta Pro hub via Telnet to enable fade time support.",
+        "data": {
+          "host": "Hub IP Address",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Lutron hub",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Lutron Fader is already configured"
+    }
+  },
+  "services": {
+    "fade_light": {
+      "name": "Fade Light",
+      "description": "Fade a Lutron light to a target brightness over a specified duration.",
+      "fields": {
+        "target_brightness_pct": {
+          "name": "Target Brightness",
+          "description": "Target brightness level (0-100%)"
+        },
+        "duration_seconds": {
+          "name": "Duration",
+          "description": "Fade duration in seconds"
+        }
+      }
+    }
+  }
+}
