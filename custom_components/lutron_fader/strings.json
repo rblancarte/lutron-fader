@@ -18,7 +18,7 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Lutron Fader is already configured"
+      "already_configured": "Lutron Fader is already configured for this hub"
     }
   },
   "services": {
