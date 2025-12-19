@@ -6,8 +6,10 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, discovery
 from homeassistant.helpers.typing import ConfigType
+
+
 
 from .const import (
     ATTR_BRIGHTNESS,
@@ -77,9 +79,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data[DOMAIN]["yaml_connection"] = connection
     hass.data[DOMAIN]["yaml_config"] = conf
     
-    # Set up the light platform via discovery (for YAML)
-    await hass.helpers.discovery.async_load_platform(
-        Platform.LIGHT, DOMAIN, {}, config
+    # Set up the light platform via discovery
+ 
+    await discovery.async_load_platform(
+        hass, "light", DOMAIN, {}, config
     )
     
     # Register services
