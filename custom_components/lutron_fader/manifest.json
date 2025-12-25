@@ -1,6 +1,7 @@
 {
   "domain": "lutron_fader",
   "name": "Lutron Fader",
+  "icon": "mdi:lightbulb-on-outline",
   "documentation": "https://github.com/rblancarte/lutron-fader",
   "requirements": [],
   "codeowners": ["@rblancarte"],

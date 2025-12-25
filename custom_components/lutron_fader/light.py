@@ -74,30 +74,41 @@ async def async_setup_platform(
         )
         fader_lights.append(fader_light)
 
-    # Option 2: Auto-discover from lutron_caseta (if no manual config)
+    # Option 2: Auto-discover zones (if no manual config)
     if not manual_lights:
-        _LOGGER.info("No manual lights configured, attempting auto-discovery from lutron_caseta")
-        
-        # Get the entity registry to find existing lutron_caseta lights
-        entity_registry = er.async_get(hass)
+        _LOGGER.info("No manual lights configured, starting auto-discovery")
 
-        # Find all lutron_caseta light entities
-        for entity in entity_registry.entities.values():
-            # Look for lutron_caseta light entities
-            if entity.platform == "lutron_caseta" and entity.domain == "light":
-                _LOGGER.info("Found lutron_caseta light: %s", entity.entity_id)
+        # Check if zone_mappings were provided in YAML
+        zone_mappings = hass.data[DOMAIN].get("zone_mappings", {})
 
-                # Create a fader version of this light
-                # Note: Zone ID will need to be set manually via service call
+        if zone_mappings:
+            # Use the zone mappings from YAML
+            _LOGGER.info("Using zone mappings from YAML configuration")
+            for zone_name, zone_id in zone_mappings.items():
                 fader_light = LutronFaderLight(
                     hass=hass,
                     connection=connection,
-                    name=f"{entity.original_name or entity.entity_id} Fader",
-                    zone_id=None,  # Will need to be set manually
-                    unique_id=f"{entity.unique_id}_fader",
-                    original_entity_id=entity.entity_id,
+                    name=f"Lutron {zone_name}",
+                    zone_id=zone_id,
+                    unique_id=f"lutron_fader_{zone_id}",
                 )
                 fader_lights.append(fader_light)
+        else:
+            # Auto-discover zones from the Lutron hub
+            _LOGGER.info("No zone mappings found, performing automatic discovery")
+            discovered_zones = await connection.discover_zones(max_zones=100)
+
+            if discovered_zones:
+                _LOGGER.info("Discovered %d zones", len(discovered_zones))
+                for zone_id, zone_name in discovered_zones.items():
+                    fader_light = LutronFaderLight(
+                        hass=hass,
+                        connection=connection,
+                        name=f"Lutron {zone_name}",
+                        zone_id=zone_id,
+                        unique_id=f"lutron_fader_zone_{zone_id}",
+                    )
+                    fader_lights.append(fader_light)
 
     if fader_lights:
         _LOGGER.info("Adding %d Lutron Fader light entities", len(fader_lights))
@@ -113,42 +124,39 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Lutron Fader lights from a config entry (for future UI config)."""
+    """Set up Lutron Fader lights from a config entry (with auto-discovery)."""
     _LOGGER.info("Setting up Lutron Fader lights from config entry")
 
     # Get our telnet connection
     connection_data = hass.data[DOMAIN][config_entry.entry_id]
     connection: LutronTelnetConnection = connection_data["connection"]
 
-    # Get the entity registry to find existing lutron_caseta lights
-    entity_registry = er.async_get(hass)
-
-    # Find all lutron_caseta light entities
     fader_lights = []
 
-    for entity in entity_registry.entities.values():
-        # Look for lutron_caseta light entities
-        if entity.platform == "lutron_caseta" and entity.domain == "light":
-            _LOGGER.info("Found lutron_caseta light: %s", entity.entity_id)
+    # Auto-discover zones from the Lutron hub
+    _LOGGER.info("Starting automatic zone discovery...")
+    discovered_zones = await connection.discover_zones(max_zones=100)
 
-            # Create a fader version of this light
+    if discovered_zones:
+        _LOGGER.info("Discovered %d zones, creating light entities", len(discovered_zones))
+
+        for zone_id, zone_name in discovered_zones.items():
             fader_light = LutronFaderLight(
                 hass=hass,
                 connection=connection,
-                name=f"{entity.original_name or entity.entity_id} Fader",
-                zone_id=None,  # Will need to be configured
-                unique_id=f"{entity.unique_id}_fader",
-                original_entity_id=entity.entity_id,
+                name=f"Lutron {zone_name}",
+                zone_id=zone_id,
+                unique_id=f"lutron_fader_zone_{zone_id}",
             )
             fader_lights.append(fader_light)
+    else:
+        _LOGGER.warning("No zones discovered during auto-discovery")
 
     if fader_lights:
         _LOGGER.info("Adding %d Lutron Fader light entities", len(fader_lights))
         async_add_entities(fader_lights, True)
     else:
-        _LOGGER.warning(
-            "No lutron_caseta lights found. Make sure lutron_caseta integration is set up first."
-        )
+        _LOGGER.warning("No lights to add after discovery")
 
 
 class LutronFaderLight(LightEntity):

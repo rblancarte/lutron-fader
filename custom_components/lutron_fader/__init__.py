@@ -19,6 +19,7 @@ from .const import (
     CONF_PASSWORD,
     CONF_PORT,
     CONF_USERNAME,
+    CONF_ZONE_MAPPINGS,
     DEFAULT_PASSWORD,
     DEFAULT_PORT,
     DEFAULT_USERNAME,
@@ -41,6 +42,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
                 vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): cv.string,
                 vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): cv.string,
+                vol.Optional(CONF_ZONE_MAPPINGS, default={}): {
+                    cv.string: cv.positive_int
+                },
             }
         )
     },
@@ -78,6 +82,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Store connection in hass.data with a special key for YAML config
     hass.data[DOMAIN]["yaml_connection"] = connection
     hass.data[DOMAIN]["yaml_config"] = conf
+    hass.data[DOMAIN]["zone_mappings"] = conf.get(CONF_ZONE_MAPPINGS, {})
     
     # Set up the light platform via discovery
  

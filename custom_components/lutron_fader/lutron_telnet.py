@@ -379,3 +379,34 @@ class LutronTelnetConnection:
     def is_connected(self) -> bool:
         """Return whether we're connected to the hub."""
         return self._connected
+
+    async def discover_zones(self, max_zones: int = 100) -> dict[int, str]:
+        """Discover all available zones on the Lutron hub.
+
+        Queries zones sequentially to find which ones exist.
+
+        Args:
+            max_zones: Maximum zone ID to check (default: 100)
+
+        Returns:
+            Dictionary mapping zone_id to zone name (e.g., {28: "Zone 28", 15: "Zone 15"})
+        """
+        _LOGGER.info("Starting zone discovery (checking zones 1-%s)", max_zones)
+        discovered_zones = {}
+
+        for zone_id in range(1, max_zones + 1):
+            # Query this zone
+            brightness = await self.query_light_level(zone_id)
+
+            if brightness is not None:
+                # Zone exists!
+                zone_name = f"Zone {zone_id}"
+                discovered_zones[zone_id] = zone_name
+                _LOGGER.info("Discovered zone %s: %s (current brightness: %s%%)",
+                           zone_id, zone_name, brightness)
+
+            # Small delay to avoid flooding the hub
+            await asyncio.sleep(0.1)
+
+        _LOGGER.info("Discovery complete - found %s zones", len(discovered_zones))
+        return discovered_zones

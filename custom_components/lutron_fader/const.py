@@ -8,6 +8,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
+CONF_ZONE_MAPPINGS = "zone_mappings"
 
 # Default values
 DEFAULT_PORT = 23
@@ -28,3 +29,4 @@ ATTR_DURATION_SECONDS = "duration_seconds"  # More explicit
 
 # Platforms
 PLATFORMS = ["light"]
+
