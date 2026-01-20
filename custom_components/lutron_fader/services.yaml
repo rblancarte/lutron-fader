@@ -63,3 +63,16 @@ long_fade:
         number:
           min: 0
           max: 7200
+
+parse_integration_report:
+  name: Parse Integration Report
+  description: Parse a Lutron Integration Report and log discovered zones. Paste the report text from the Lutron app.
+  fields:
+    report_text:
+      name: Integration Report
+      description: Paste the full Integration Report text from the Lutron app (Settings > Advanced > Integration > Send Integration Report).
+      required: true
+      example: "INTEGRATION ID,NAME,TYPE\n1,Living Room,Light\n28,Bedroom Main,Light"
+      selector:
+        text:
+          multiline: true

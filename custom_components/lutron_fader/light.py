@@ -74,10 +74,8 @@ async def async_setup_platform(
         )
         fader_lights.append(fader_light)
 
-    # Option 2: Auto-discover zones (if no manual config)
+    # Option 2: Use zone_mappings (if no manual config)
     if not manual_lights:
-        _LOGGER.info("No manual lights configured, starting auto-discovery")
-
         # Check if zone_mappings were provided in YAML
         zone_mappings = hass.data[DOMAIN].get("zone_mappings", {})
 
@@ -94,21 +92,7 @@ async def async_setup_platform(
                 )
                 fader_lights.append(fader_light)
         else:
-            # Auto-discover zones from the Lutron hub
-            _LOGGER.info("No zone mappings found, performing automatic discovery")
-            discovered_zones = await connection.discover_zones(max_zones=100)
-
-            if discovered_zones:
-                _LOGGER.info("Discovered %d zones", len(discovered_zones))
-                for zone_id, zone_name in discovered_zones.items():
-                    fader_light = LutronFaderLight(
-                        hass=hass,
-                        connection=connection,
-                        name=f"Lutron {zone_name}",
-                        zone_id=zone_id,
-                        unique_id=f"lutron_fader_zone_{zone_id}",
-                    )
-                    fader_lights.append(fader_light)
+            _LOGGER.warning("No zone_mappings configured in YAML")
 
     if fader_lights:
         _LOGGER.info("Adding %d Lutron Fader light entities", len(fader_lights))
@@ -124,39 +108,19 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Lutron Fader lights from a config entry (with auto-discovery)."""
+    """Set up Lutron Fader lights from a config entry (UI-based config)."""
     _LOGGER.info("Setting up Lutron Fader lights from config entry")
 
     # Get our telnet connection
     connection_data = hass.data[DOMAIN][config_entry.entry_id]
     connection: LutronTelnetConnection = connection_data["connection"]
 
-    fader_lights = []
+    # For UI-based setup, we don't create any light entities automatically
+    # Users should use the services with zone_id directly
+    _LOGGER.info("UI-based config complete. Use lutron_fader services with zone_id to control lights.")
 
-    # Auto-discover zones from the Lutron hub
-    _LOGGER.info("Starting automatic zone discovery...")
-    discovered_zones = await connection.discover_zones(max_zones=100)
-
-    if discovered_zones:
-        _LOGGER.info("Discovered %d zones, creating light entities", len(discovered_zones))
-
-        for zone_id, zone_name in discovered_zones.items():
-            fader_light = LutronFaderLight(
-                hass=hass,
-                connection=connection,
-                name=f"Lutron {zone_name}",
-                zone_id=zone_id,
-                unique_id=f"lutron_fader_zone_{zone_id}",
-            )
-            fader_lights.append(fader_light)
-    else:
-        _LOGGER.warning("No zones discovered during auto-discovery")
-
-    if fader_lights:
-        _LOGGER.info("Adding %d Lutron Fader light entities", len(fader_lights))
-        async_add_entities(fader_lights, True)
-    else:
-        _LOGGER.warning("No lights to add after discovery")
+    # Don't create any entities - just make the services available
+    # Users can call services directly with zone IDs
 
 
 class LutronFaderLight(LightEntity):

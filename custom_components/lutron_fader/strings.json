@@ -35,6 +35,16 @@
           "description": "Fade duration in seconds"
         }
       }
+    },
+    "parse_integration_report": {
+      "name": "Parse Integration Report",
+      "description": "Parse a Lutron Integration Report and generate zone mappings configuration.",
+      "fields": {
+        "report_text": {
+          "name": "Integration Report",
+          "description": "Paste the full Integration Report text from the Lutron app"
+        }
+      }
     }
   }
 }

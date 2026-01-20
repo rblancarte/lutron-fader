@@ -14,6 +14,7 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     ATTR_BRIGHTNESS,
     ATTR_FADE_TIME,
+    ATTR_REPORT_TEXT,
     ATTR_ZONE_ID,
     CONF_HOST,
     CONF_PASSWORD,
@@ -26,6 +27,7 @@ from .const import (
     DOMAIN,
     SERVICE_FADE_TO,
     SERVICE_LONG_FADE,
+    SERVICE_PARSE_REPORT,
 )
 from .lutron_telnet import LutronTelnetConnection
 
@@ -174,6 +176,90 @@ async def _async_setup_services(
 
         await connection.set_light_level(zone_id, brightness, duration)
 
+    async def handle_parse_integration_report(call: ServiceCall) -> None:
+        """Handle the parse_integration_report service call."""
+        import json
+
+        report_text = call.data[ATTR_REPORT_TEXT]
+
+        _LOGGER.info("Parsing Integration Report...")
+
+        # Parse the report to extract zones
+        zones = {}
+
+        # Try JSON format first
+        try:
+            report_data = json.loads(report_text)
+            _LOGGER.info("Detected JSON format Integration Report")
+
+            # Navigate to Zones in the JSON structure
+            if "LIPIdList" in report_data and "Zones" in report_data["LIPIdList"]:
+                for zone in report_data["LIPIdList"]["Zones"]:
+                    zone_id = zone.get("ID")
+                    zone_name = zone.get("Name")
+                    area_name = zone.get("Area", {}).get("Name", "")
+
+                    if zone_id and zone_name:
+                        # Include area in the name if available
+                        full_name = f"{area_name} {zone_name}" if area_name else zone_name
+                        zones[zone_id] = full_name
+                        _LOGGER.info("Found zone %s: %s", zone_id, full_name)
+            else:
+                _LOGGER.warning("JSON format not recognized - expected LIPIdList.Zones structure")
+
+        except json.JSONDecodeError:
+            # Fall back to CSV parsing
+            _LOGGER.info("Not JSON, trying CSV format")
+            lines = report_text.strip().split('\n')
+
+            for line in lines:
+                # Skip empty lines and header
+                if not line.strip() or 'INTEGRATION ID' in line.upper():
+                    continue
+
+                # Try to parse CSV format: ID,Name,Type
+                parts = [p.strip() for p in line.split(',')]
+
+                if len(parts) >= 2:
+                    try:
+                        zone_id = int(parts[0])
+                        zone_name = parts[1]
+                        zone_type = parts[2] if len(parts) > 2 else "Unknown"
+
+                        # Only include lights/outputs
+                        if 'light' in zone_type.lower() or 'output' in zone_type.lower() or zone_type == "Unknown":
+                            zones[zone_id] = zone_name
+                            _LOGGER.info("Found zone %s: %s (%s)", zone_id, zone_name, zone_type)
+                    except (ValueError, IndexError):
+                        _LOGGER.debug("Skipping invalid line: %s", line)
+
+        # Log the YAML configuration
+        if zones:
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("DISCOVERED ZONES - Add to your configuration.yaml:")
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("lutron_fader:")
+            _LOGGER.info("  host: YOUR_HUB_IP")
+            _LOGGER.info("  zone_mappings:")
+            for zone_id, zone_name in sorted(zones.items()):
+                # Create a safe key from the zone name
+                safe_name = zone_name.lower().replace(' ', '_').replace('-', '_')
+                safe_name = ''.join(c for c in safe_name if c.isalnum() or c == '_')
+                _LOGGER.info("    %s: %s  # %s", safe_name, zone_id, zone_name)
+            _LOGGER.info("=" * 60)
+
+            # Create a persistent notification for the user
+            hass.components.persistent_notification.create(
+                title="Lutron Integration Report Parsed",
+                message=f"Found {len(zones)} zones. Check the logs for the YAML configuration to add to configuration.yaml.",
+            )
+        else:
+            _LOGGER.warning("No zones found in the Integration Report")
+            hass.components.persistent_notification.create(
+                title="Lutron Integration Report - No Zones Found",
+                message="Could not parse any zones from the report. Please check the format and try again.",
+            )
+
     # Register services with schemas for validation
     hass.services.async_register(
         DOMAIN,
@@ -204,5 +290,16 @@ async def _async_setup_services(
             }
         ),
     )
-    
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PARSE_REPORT,
+        handle_parse_integration_report,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_REPORT_TEXT): cv.string,
+            }
+        ),
+    )
+
     _LOGGER.info("Lutron Fader services registered")
