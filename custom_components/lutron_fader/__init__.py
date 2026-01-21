@@ -249,15 +249,23 @@ async def _async_setup_services(
             _LOGGER.info("=" * 60)
 
             # Create a persistent notification for the user
-            hass.components.persistent_notification.create(
-                title="Lutron Integration Report Parsed",
-                message=f"Found {len(zones)} zones. Check the logs for the YAML configuration to add to configuration.yaml.",
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Lutron Integration Report Parsed",
+                    "message": f"Found {len(zones)} zones. Check the logs for the YAML configuration to add to configuration.yaml.",
+                },
             )
         else:
             _LOGGER.warning("No zones found in the Integration Report")
-            hass.components.persistent_notification.create(
-                title="Lutron Integration Report - No Zones Found",
-                message="Could not parse any zones from the report. Please check the format and try again.",
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Lutron Integration Report - No Zones Found",
+                    "message": "Could not parse any zones from the report. Please check the format and try again.",
+                },
             )
 
     # Register services with schemas for validation

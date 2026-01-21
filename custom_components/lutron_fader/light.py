@@ -146,7 +146,7 @@ class LutronFaderLight(LightEntity):
         self._attr_unique_id = unique_id
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self._attr_color_mode = ColorMode.BRIGHTNESS
-        self._attr_should_poll = True
+        self._attr_should_poll = False  # Disable automatic polling
 
         # State tracking
         self._attr_is_on = False

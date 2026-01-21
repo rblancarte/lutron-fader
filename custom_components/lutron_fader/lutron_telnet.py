@@ -15,73 +15,79 @@ PING_INTERVAL = 60  # seconds
 class LutronTelnetConnection:
     """Manages Telnet connection to Lutron Caseta Pro hub with auto-disconnect."""
 
-    def __init__(self, host: str, port: int = 23, username: str = "lutron", password: str = "integration"):
+    def __init__(self, host: str, port: int = 23, username: str = "lutron", password: str = "integration", ping_zone: int = 1):
         """Initialize the Telnet connection.
-        
+
         Args:
             host: IP address of the Lutron hub (e.g., "10.0.1.111")
             port: Telnet port (default: 23)
             username: Telnet username (default: "lutron")
             password: Telnet password (default: "integration")
+            ping_zone: Zone ID to use for keep-alive pings (default: 1)
         """
         self.host = host
         self.port = port
         self.username = username
         self.password = password
+        self.ping_zone = ping_zone
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._connected = False
         self._disconnect_timer: Optional[asyncio.Task] = None
         self._ping_timer: Optional[asyncio.Task] = None
+        self._connect_lock = asyncio.Lock()  # Prevent concurrent connection attempts
+        self._command_lock = asyncio.Lock()  # Serialize command/response cycles
 
     async def connect(self) -> bool:
         """Establish connection to the Lutron hub.
-        
+
         Returns:
             True if connection successful, False otherwise
         """
-        # If already connected, just reset the timer
-        if self._connected:
-            _LOGGER.debug("Already connected, resetting disconnect timer")
-            self._reset_disconnect_timer()
-            return True
-        
-        try:
-            _LOGGER.debug("Connecting to Lutron hub at %s:%s", self.host, self.port)
-            
-            # Open TCP connection (like: telnet $LUTRON_HOST $LUTRON_PORT)
-            self._reader, self._writer = await asyncio.open_connection(
-                self.host, self.port
-            )
-            
-            # Wait for login prompt and send username
-            await asyncio.sleep(1)
-            self._writer.write(f"{self.username}\r\n".encode())
-            await self._writer.drain()
-            
-            # Wait and send password
-            await asyncio.sleep(1)
-            self._writer.write(f"{self.password}\r\n".encode())
-            await self._writer.drain()
-            
-            # Give it a moment to authenticate
-            await asyncio.sleep(1)
-            
-            self._connected = True
-            _LOGGER.info("Successfully connected to Lutron hub at %s", self.host)
+        # Use a lock to prevent concurrent connection attempts
+        async with self._connect_lock:
+            # If already connected, just reset the timer
+            if self._connected:
+                _LOGGER.debug("Already connected, resetting disconnect timer")
+                self._reset_disconnect_timer()
+                return True
 
-            # Start the auto-disconnect timer
-            self._reset_disconnect_timer()
+            try:
+                _LOGGER.debug("Connecting to Lutron hub at %s:%s", self.host, self.port)
 
-            # Start the ping timer
-            self._start_ping_timer()
+                # Open TCP connection (like: telnet $LUTRON_HOST $LUTRON_PORT)
+                self._reader, self._writer = await asyncio.open_connection(
+                    self.host, self.port
+                )
 
-            return True
-            
-        except Exception as e:
-            _LOGGER.error("Failed to connect to Lutron hub: %s", e)
-            self._connected = False
-            return False
+                # Wait for login prompt and send username
+                await asyncio.sleep(1)
+                self._writer.write(f"{self.username}\r\n".encode())
+                await self._writer.drain()
+
+                # Wait and send password
+                await asyncio.sleep(1)
+                self._writer.write(f"{self.password}\r\n".encode())
+                await self._writer.drain()
+
+                # Give it a moment to authenticate
+                await asyncio.sleep(1)
+
+                self._connected = True
+                _LOGGER.info("Successfully connected to Lutron hub at %s", self.host)
+
+                # Start the auto-disconnect timer
+                self._reset_disconnect_timer()
+
+                # Start the ping timer
+                self._start_ping_timer()
+
+                return True
+
+            except Exception as e:
+                _LOGGER.error("Failed to connect to Lutron hub: %s", e)
+                self._connected = False
+                return False
 
     async def disconnect(self) -> None:
         """Close the Telnet connection."""
@@ -185,7 +191,7 @@ class LutronTelnetConnection:
             return
 
         try:
-            command = "?OUTPUT,1,1"
+            command = f"?OUTPUT,{self.ping_zone},1"
             _LOGGER.debug("Sending ping: %s", command)
 
             # Send the command directly without calling send_command()
@@ -204,7 +210,7 @@ class LutronTelnetConnection:
                     parts = response.split(',')
                     if len(parts) >= 4:
                         brightness = float(parts[3])
-                        _LOGGER.debug("Ping response - Zone 1 is at %s%%", brightness)
+                        _LOGGER.debug("Ping response - Zone %s is at %s%%", self.ping_zone, brightness)
                 except (ValueError, IndexError) as e:
                     _LOGGER.debug("Error parsing ping response '%s': %s", response, e)
             else:
@@ -233,33 +239,36 @@ class LutronTelnetConnection:
                 _LOGGER.error("Failed to connect before sending command")
                 return None
 
-        # Reset the disconnect timer since we're sending a command
-        self._reset_disconnect_timer()
+        # Use a lock to serialize command/response cycles
+        # This prevents multiple coroutines from reading the same stream simultaneously
+        async with self._command_lock:
+            # Reset the disconnect timer since we're sending a command
+            self._reset_disconnect_timer()
 
-        # Reset the ping timer to avoid redundant ping right after a command
-        self._reset_ping_timer()
+            # Reset the ping timer to avoid redundant ping right after a command
+            self._reset_ping_timer()
 
-        try:
-            _LOGGER.debug("Sending command: %s", command)
+            try:
+                _LOGGER.debug("Sending command: %s", command)
 
-            # Send the command (like: echo "#OUTPUT,25,1,0,30:00")
-            self._writer.write(f"{command}\r\n".encode())
-            await self._writer.drain()
+                # Send the command (like: echo "#OUTPUT,25,1,0,30:00")
+                self._writer.write(f"{command}\r\n".encode())
+                await self._writer.drain()
 
-            # Wait a moment for the response
-            await asyncio.sleep(0.5)
+                # Wait a moment for the response
+                await asyncio.sleep(0.5)
 
-            # Read the response
-            response = await self._read_response()
-            _LOGGER.debug("Received response: %s", response)
+                # Read the response
+                response = await self._read_response()
+                _LOGGER.debug("Received response: %s", response)
 
-            return response
+                return response
 
-        except Exception as e:
-            _LOGGER.error("Error sending command '%s': %s", command, e)
-            # Connection might be broken, disconnect and retry next time
-            await self.disconnect()
-            return None
+            except Exception as e:
+                _LOGGER.error("Error sending command '%s': %s", command, e)
+                # Connection might be broken, disconnect and retry next time
+                await self.disconnect()
+                return None
 
     async def _read_response(self) -> str:
         """Read response from the hub.
