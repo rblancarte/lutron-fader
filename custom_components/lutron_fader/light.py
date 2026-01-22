@@ -12,7 +12,7 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 import voluptuous as vol
@@ -115,12 +115,44 @@ async def async_setup_entry(
     connection_data = hass.data[DOMAIN][config_entry.entry_id]
     connection: LutronTelnetConnection = connection_data["connection"]
 
-    # For UI-based setup, we don't create any light entities automatically
-    # Users should use the services with zone_id directly
-    _LOGGER.info("UI-based config complete. Use lutron_fader services with zone_id to control lights.")
+    # Get zone mappings from config entry (populated by auto_configure service)
+    zone_mappings = config_entry.data.get("zone_mappings", {})
 
-    # Don't create any entities - just make the services available
-    # Users can call services directly with zone IDs
+    if not zone_mappings:
+        _LOGGER.info("No zone mappings found. Run auto_configure_from_report service to create entities.")
+        return
+
+    # Create light entities for each mapped zone
+    fader_lights = []
+
+    for entity_id, zone_id in zone_mappings.items():
+        # Get the original entity to extract its friendly name
+        state = hass.states.get(entity_id)
+        if state:
+            name = state.attributes.get("friendly_name", f"Zone {zone_id}")
+        else:
+            name = f"Zone {zone_id}"
+
+        # Create a unique_id for this lutron_fader entity
+        unique_id = f"lutron_fader_zone_{zone_id}"
+
+        _LOGGER.info("Creating Lutron Fader entity: %s (Zone %s)", name, zone_id)
+
+        fader_light = LutronFaderLight(
+            hass=hass,
+            connection=connection,
+            name=name,
+            zone_id=zone_id,
+            unique_id=unique_id,
+            original_entity_id=entity_id,
+        )
+        fader_lights.append(fader_light)
+
+    if fader_lights:
+        _LOGGER.info("Adding %d Lutron Fader light entities from config entry", len(fader_lights))
+        async_add_entities(fader_lights, True)
+    else:
+        _LOGGER.warning("No lights created. Check zone_mappings in config entry.")
 
 
 class LutronFaderLight(LightEntity):
