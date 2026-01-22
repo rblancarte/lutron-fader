@@ -307,6 +307,24 @@ class LutronTelnetConnection:
                         # Just return the cleaned line
                         return line.strip()
 
+                # Handle partial response that's missing the ~ prefix
+                # Sometimes we get "OUTPUT,25,1,0.00" instead of "~OUTPUT,25,1,0.00"
+                if line.strip() and ',' in line:
+                    parts = line.strip().split(',')
+                    # Check if it looks like an OUTPUT response (ID,action,brightness)
+                    if len(parts) >= 3:
+                        try:
+                            # Try parsing as zone_id, action, brightness
+                            int(parts[0])  # zone_id
+                            int(parts[1])  # action
+                            float(parts[2])  # brightness
+                            # This looks like a valid response, just add the ~ prefix
+                            _LOGGER.debug("Fixing malformed response (missing ~): %s", line.strip())
+                            return f"~OUTPUT,{line.strip()}"
+                        except (ValueError, IndexError):
+                            # Not a valid response format
+                            pass
+
             # No response found - return empty string for cleaner error handling
             _LOGGER.debug("No valid response found in: %s", full_response)
             return ""

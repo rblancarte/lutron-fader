@@ -1,16 +1,24 @@
 fade_to:
   name: Fade Light
-  description: Fade a Lutron light to a specific brightness over a duration.
+  description: Fade a Lutron light to a specific brightness over a duration. Use either zone_id or entity_id.
   fields:
     zone_id:
       name: Zone ID
-      description: The Lutron zone ID of the light.
-      required: true
+      description: The Lutron zone ID of the light (use this OR entity_id).
+      required: false
       example: 28
       selector:
         number:
           min: 1
           max: 999
+    entity_id:
+      name: Entity ID
+      description: The Lutron Caseta light entity ID (use this OR zone_id). Must run auto_configure_from_report first.
+      required: false
+      example: light.master_bedroom_ron_lamp
+      selector:
+        entity:
+          domain: light
     brightness:
       name: Brightness
       description: Target brightness (0-100).
@@ -33,17 +41,25 @@ fade_to:
 
 long_fade:
   name: Long Fade
-  description: Fade a Lutron light with extended duration (useful for bedtime routines).
+  description: Fade a Lutron light with extended duration (useful for bedtime routines). Use either zone_id or entity_id.
   fields:
     zone_id:
       name: Zone ID
-      description: The Lutron zone ID of the light.
-      required: true
+      description: The Lutron zone ID of the light (use this OR entity_id).
+      required: false
       example: 28
       selector:
         number:
           min: 1
           max: 999
+    entity_id:
+      name: Entity ID
+      description: The Lutron Caseta light entity ID (use this OR zone_id). Must run auto_configure_from_report first.
+      required: false
+      example: light.master_bedroom_ron_lamp
+      selector:
+        entity:
+          domain: light
     brightness:
       name: Brightness
       description: Target brightness (0-100).
@@ -73,6 +89,23 @@ parse_integration_report:
       description: Paste the full Integration Report text from the Lutron app (Settings > Advanced > Integration > Send Integration Report).
       required: true
       example: "INTEGRATION ID,NAME,TYPE\n1,Living Room,Light\n28,Bedroom Main,Light"
+      selector:
+        text:
+          multiline: true
+
+discover_lutron_entities:
+  name: Discover Lutron Entities
+  description: Scan the entity registry for Lutron Caseta entities and log their details. Check logs for discovered entities and zone information.
+
+auto_configure_from_report:
+  name: Auto-Configure from Integration Report
+  description: Parse Integration Report and automatically match entities to zone IDs in one step. Check logs for detailed mapping results.
+  fields:
+    report_text:
+      name: Integration Report
+      description: Paste the full Integration Report text from the Lutron app (Settings > Advanced > Integration > Send Integration Report).
+      required: true
+      example: '{"LIPIdList":{"Zones":[{"ID":5,"Name":"Master Bedroom Ron Lamp"}]}}'
       selector:
         text:
           multiline: true

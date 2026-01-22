@@ -28,6 +28,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): str,
         vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): str,
+        vol.Optional("ping_zone", default=1): int,
     }
 )
 
@@ -42,6 +43,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         port=data[CONF_PORT],
         username=data[CONF_USERNAME],
         password=data[CONF_PASSWORD],
+        ping_zone=data.get("ping_zone", 1),
     )
 
     # Test connection

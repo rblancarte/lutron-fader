@@ -9,7 +9,11 @@
           "host": "Hub IP Address",
           "port": "Port",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "ping_zone": "Ping Zone (for keep-alive)"
+        },
+        "data_description": {
+          "ping_zone": "Zone ID to use for connection keep-alive pings (default: 1)"
         }
       }
     },

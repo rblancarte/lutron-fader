@@ -19,9 +19,12 @@ DEFAULT_PASSWORD = "integration"
 SERVICE_FADE_TO = "fade_to"
 SERVICE_LONG_FADE = "long_fade"
 SERVICE_PARSE_REPORT = "parse_integration_report"
+SERVICE_DISCOVER_ENTITIES = "discover_lutron_entities"
+SERVICE_AUTO_CONFIGURE = "auto_configure_from_report"
 
 # Service parameters / Attributes
 ATTR_ZONE_ID = "zone_id"
+ATTR_ENTITY_ID = "entity_id"
 ATTR_BRIGHTNESS = "brightness"
 ATTR_TARGET_BRIGHTNESS_PCT = "target_brightness_pct"  # Alternative name
 ATTR_FADE_TIME = "fade_time"
