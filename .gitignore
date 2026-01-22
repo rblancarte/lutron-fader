@@ -47,7 +47,8 @@ secrets.yaml
 .storage/
 deps/
 tts/
-www/
+# Ignore www folder at root, but not in custom_components
+/www/
 
 # Testing
 .pytest_cache/

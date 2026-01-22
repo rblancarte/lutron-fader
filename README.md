@@ -88,6 +88,45 @@ To find the zone ID for your lights:
    - Copy to clipboard or email to yourself
 3. Zone IDs are listed in the report under "Zones"
 
+## Custom Lovelace Card
+
+This integration includes a custom Lovelace card for easy control of your Lutron lights with fade times.
+
+### Installing the Card
+
+1. The card is automatically included with the integration
+2. Go to **Settings → Dashboards → Resources** (☰ menu → Resources)
+3. Click **"+ Add Resource"**
+4. Enter:
+   - URL: `/lutron_fader_static/lutron-fader-card.js`
+   - Resource type: **JavaScript Module**
+5. Click "Create"
+6. Refresh your browser (Ctrl+F5 or Cmd+Shift+R)
+
+### Using the Card
+
+Add to your dashboard in YAML mode:
+
+```yaml
+type: custom:lutron-fader-card
+entity: light.living_room_floor_lamp
+```
+
+Or use the visual editor:
+1. Edit your dashboard
+2. Click "+ Add Card"
+3. Search for "Lutron Fader Card"
+4. Select your entity
+
+### Card Features
+
+- **Current State Display**: Shows ON/OFF status and current brightness
+- **Brightness Slider**: Select desired brightness (0-100%)
+- **Fade Time Input**: Enter fade duration (0-3600 seconds)
+- **Start Fade Button**: Execute the fade to selected brightness
+- **Turn Off Button**: Turn off light with specified fade time
+- **Input Validation**: Ensures fade time is within valid range
+
 ## Usage
 
 ### Service: `lutron_fader.fade_to`
@@ -229,8 +268,8 @@ This integration is under active development. Contributions are welcome!
 
 ### To-Do List
 - [x] GUI setup / Config Flow
-- [ ] Automatic light discovery
-- [ ] Custom Lovelace cards for light popups
+- [x] Automatic light discovery
+- [x] Custom Lovelace card with fade controls
 - [ ] HACS integration
 - [ ] Multi-zone fade service
 - [ ] Fade cancellation

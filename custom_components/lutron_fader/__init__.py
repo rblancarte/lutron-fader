@@ -131,6 +131,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if "yaml_connection" not in hass.data[DOMAIN]:
         await _async_setup_services(hass, connection)
 
+    # Register frontend resources
+    await _async_register_frontend_resources(hass)
+
     # Forward the setup to the light platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -608,3 +611,29 @@ async def _async_setup_services(
     )
 
     _LOGGER.info("Lutron Fader services registered")
+
+
+async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
+    """Register frontend resources (custom card)."""
+    import os
+
+    # Only register once
+    if "frontend_registered" in hass.data.get(DOMAIN, {}):
+        return
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN]["frontend_registered"] = True
+
+    # Get the path to our www directory
+    www_path = os.path.join(os.path.dirname(__file__), "www")
+
+    # Register the Lovelace resource
+    hass.http.register_static_path(
+        f"/lutron_fader_static",
+        www_path,
+        cache_headers=False,
+    )
+
+    _LOGGER.info(
+        "Lutron Fader card available at: /lutron_fader_static/lutron-fader-card.js"
+    )
