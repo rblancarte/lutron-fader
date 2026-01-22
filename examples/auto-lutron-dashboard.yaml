@@ -1,0 +1,51 @@
+# Auto-Lutron Fader Dashboard
+# This will automatically show all Lutron Fader entities with the custom card
+
+# Option 1: Manual grid (works without additional plugins)
+type: grid
+columns: 2
+cards:
+  - type: custom:lutron-fader-card
+    entity: light.living_room_floor_lamp
+  - type: custom:lutron-fader-card
+    entity: light.living_room_table_lamps
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_megan_lamp
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_ron_lamp
+  - type: custom:lutron-fader-card
+    entity: light.titus_bedroom_far_floor_lamp
+  - type: custom:lutron-fader-card
+    entity: light.titus_bedroom_near_floor_lamp
+
+---
+
+# Option 2: With auto-entities (requires auto-entities custom card from HACS)
+# Install auto-entities from HACS first, then use this:
+type: custom:auto-entities
+card:
+  type: grid
+  columns: 2
+filter:
+  include:
+    - integration: lutron_fader
+      options:
+        type: custom:lutron-fader-card
+  exclude: []
+sort:
+  method: name
+
+---
+
+# Option 3: Compact list with entity cards that you can click
+# These show in a list but you can add tap actions later
+type: entities
+entities:
+  - entity: light.living_room_floor_lamp
+  - entity: light.living_room_table_lamps
+  - entity: light.master_bedroom_megan_lamp
+  - entity: light.master_bedroom_ron_lamp
+  - entity: light.titus_bedroom_far_floor_lamp
+  - entity: light.titus_bedroom_near_floor_lamp
+title: Lutron Fader Controls
+show_header_toggle: false

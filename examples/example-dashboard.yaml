@@ -1,0 +1,72 @@
+# Example Lovelace Dashboard Configuration for Lutron Fader Cards
+# Copy this to your dashboard YAML or use as a reference
+
+# Single Card Example
+type: custom:lutron-fader-card
+entity: light.living_room_floor_lamp
+
+---
+
+# Multiple Cards in a Vertical Stack
+type: vertical-stack
+cards:
+  - type: custom:lutron-fader-card
+    entity: light.living_room_floor_lamp
+    name: Living Room Floor
+
+  - type: custom:lutron-fader-card
+    entity: light.living_room_table_lamps
+    name: Living Room Table
+
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_megan_lamp
+    name: Megan's Lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_ron_lamp
+    name: Ron's Lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.titus_bedroom_far_floor_lamp
+    name: Titus Far Floor
+
+  - type: custom:lutron-fader-card
+    entity: light.titus_bedroom_near_floor_lamp
+    name: Titus Near Floor
+
+---
+
+# Grid Layout Example
+type: grid
+columns: 2
+cards:
+  - type: custom:lutron-fader-card
+    entity: light.living_room_floor_lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.living_room_table_lamps
+
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_megan_lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_ron_lamp
+
+---
+
+# Panel with Title
+type: vertical-stack
+cards:
+  - type: markdown
+    content: |
+      # Lutron Fader Controls
+      Control all Lutron lights with custom fade times
+
+  - type: custom:lutron-fader-card
+    entity: light.living_room_floor_lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.master_bedroom_ron_lamp
+
+  - type: custom:lutron-fader-card
+    entity: light.titus_bedroom_far_floor_lamp

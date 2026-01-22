@@ -127,6 +127,14 @@ Or use the visual editor:
 - **Turn Off Button**: Turn off light with specified fade time
 - **Input Validation**: Ensures fade time is within valid range
 
+### Dashboard Examples
+
+For complete dashboard configuration examples, see the [examples/](examples/) folder:
+- Single and multiple card layouts
+- Grid and vertical stack arrangements
+- Auto-entities configurations
+- Full page dashboard templates
+
 ## Usage
 
 ### Service: `lutron_fader.fade_to`
