@@ -17,7 +17,6 @@ DEFAULT_PASSWORD = "integration"
 
 # Service names
 SERVICE_FADE_TO = "fade_to"
-SERVICE_LONG_FADE = "long_fade"
 SERVICE_PARSE_REPORT = "parse_integration_report"
 SERVICE_DISCOVER_ENTITIES = "discover_lutron_entities"
 SERVICE_AUTO_CONFIGURE = "auto_configure_from_report"

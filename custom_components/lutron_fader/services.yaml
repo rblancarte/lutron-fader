@@ -39,47 +39,6 @@ fade_to:
           min: 0
           max: 7200
 
-long_fade:
-  name: Long Fade
-  description: Fade a Lutron light with extended duration (useful for bedtime routines). Use either zone_id or entity_id.
-  fields:
-    zone_id:
-      name: Zone ID
-      description: The Lutron zone ID of the light (use this OR entity_id).
-      required: false
-      example: 28
-      selector:
-        number:
-          min: 1
-          max: 999
-    entity_id:
-      name: Entity ID
-      description: The Lutron Caseta light entity ID (use this OR zone_id). Must run auto_configure_from_report first.
-      required: false
-      example: light.master_bedroom_ron_lamp
-      selector:
-        entity:
-          domain: light
-    brightness:
-      name: Brightness
-      description: Target brightness (0-100).
-      required: true
-      example: 0
-      selector:
-        number:
-          min: 0
-          max: 100
-    duration:
-      name: Duration
-      description: Duration of the fade in seconds (default 30 minutes).
-      required: false
-      default: 1800
-      example: 1800
-      selector:
-        number:
-          min: 0
-          max: 7200
-
 parse_integration_report:
   name: Parse Integration Report
   description: Parse a Lutron Integration Report and log discovered zones. Paste the report text from the Lutron app.

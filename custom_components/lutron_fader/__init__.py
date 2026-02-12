@@ -152,7 +152,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         len(hass.data[DOMAIN]) == 1 and "yaml_connection" in hass.data[DOMAIN]
     ):
         hass.services.async_remove(DOMAIN, SERVICE_FADE_TO)
-        hass.services.async_remove(DOMAIN, SERVICE_LONG_FADE)
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
@@ -201,21 +200,6 @@ async def _async_setup_services(
         )
 
         await connection.set_light_level(zone_id, brightness, fade_time)
-
-    async def handle_long_fade(call: ServiceCall) -> None:
-        """Handle the long_fade service call."""
-        zone_id = get_zone_id_from_call(call)
-        brightness = call.data[ATTR_BRIGHTNESS]
-        duration = call.data.get("duration", 1800)  # Default 30 minutes
-
-        _LOGGER.info(
-            "Long fade service called: zone=%s, brightness=%s, duration=%s seconds",
-            zone_id,
-            brightness,
-            duration,
-        )
-
-        await connection.set_light_level(zone_id, brightness, duration)
 
     async def handle_discover_lutron_entities(call: ServiceCall) -> None:
         """Discover Lutron Caseta entities from the official integration."""
@@ -411,22 +395,6 @@ async def _async_setup_services(
                     vol.Coerce(int), vol.Range(min=0, max=100)
                 ),
                 vol.Optional(ATTR_FADE_TIME, default=0): cv.positive_int,
-            }
-        ),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_LONG_FADE,
-        handle_long_fade,
-        schema=vol.Schema(
-            {
-                vol.Exclusive(ATTR_ZONE_ID, "zone_or_entity"): cv.positive_int,
-                vol.Exclusive(ATTR_ENTITY_ID, "zone_or_entity"): cv.entity_id,
-                vol.Required(ATTR_BRIGHTNESS): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100)
-                ),
-                vol.Optional("duration", default=1800): cv.positive_int,
             }
         ),
     )

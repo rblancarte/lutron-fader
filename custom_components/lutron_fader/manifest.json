@@ -3,6 +3,7 @@
   "name": "Lutron Fader",
   "icon": "mdi:lightbulb-on-outline",
   "documentation": "https://github.com/rblancarte/lutron-fader",
+  "issue_tracker": "https://github.com/rblancarte/lutron-fader/issues",
   "requirements": [],
   "codeowners": ["@rblancarte"],
   "after_dependencies": ["lutron_caseta"],

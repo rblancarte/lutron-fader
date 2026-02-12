@@ -31,7 +31,7 @@ All of this happens through a single service call—no manual dimming, no multip
 
 - 🌅 **Long fade times** - Fade lights over minutes or hours (not limited by standard HA transition times)
 - 🔌 **Direct Telnet control** - Bypasses standard integration limits using Lutron Integration Protocol (LIP)
-- 🎛️ **Custom services** - `lutron_fader.fade_to` and `lutron_fader.long_fade`
+- 🎛️ **Custom service** - `lutron_fader.fade_to` with extended fade time support
 - 🔄 **Connection management** - Intelligent connection pooling with automatic keep-alive
 
 ## Requirements
@@ -139,7 +139,8 @@ For complete dashboard configuration examples, see the [examples/](examples/) fo
 
 ### Service: `lutron_fader.fade_to`
 
-Fade a light to a specific brightness over time:
+Fade a light to a specific brightness over time. Supports fade times from 0 to 7200 seconds (2 hours):
+
 ```yaml
 service: lutron_fader.fade_to
 data:
@@ -148,15 +149,14 @@ data:
   fade_time: 1800   # 30 minutes in seconds
 ```
 
-### Service: `lutron_fader.long_fade`
+You can also use entity_id instead of zone_id (requires running `auto_configure_from_report` first):
 
-Same as `fade_to` but with explicit duration parameter (defaults to 30 minutes if not specified):
 ```yaml
-service: lutron_fader.long_fade
+service: lutron_fader.fade_to
 data:
-  zone_id: 28
+  entity_id: light.master_bedroom_ron_lamp
   brightness: 0     # Turn off
-  duration: 3600    # 1 hour
+  fade_time: 3600   # 1 hour
 ```
 
 ## Example Automations
