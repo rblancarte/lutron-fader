@@ -292,7 +292,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c LUTRON-FADER-CARD %c Version 1.0.0 ',
+  '%c LUTRON-FADER-CARD %c Version 0.9.0 ',
   'color: white; background: #039be5; font-weight: 700;',
   'color: #039be5; background: white; font-weight: 700;'
 );

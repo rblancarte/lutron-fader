@@ -34,15 +34,15 @@ This document outlines the steps to submit Lutron Fader to HACS (Home Assistant 
 
 1. **Tag your current version:**
    ```bash
-   git tag -a v0.1.0 -m "Initial release"
-   git push origin v0.1.0
+   git tag -a v0.9.0 -m "Initial release"
+   git push origin v0.9.0
    ```
 
 2. **Create a release on GitHub:**
    - Go to https://github.com/rblancarte/lutron-fader/releases
    - Click "Create a new release"
-   - Select tag: `v0.1.0`
-   - Release title: `v0.1.0 - Initial Release`
+   - Select tag: `v0.9.0`
+   - Release title: `v0.9.0 - Initial Release`
    - Description:
      ```markdown
      ## Features
@@ -144,7 +144,7 @@ lutron_fader/
 
      ### Checklist
      - [x] Repository is public
-     - [x] Has at least one release (v0.1.0)
+     - [x] Has at least one release (v0.9.0)
      - [x] `hacs.json` present and valid
      - [x] `README.md` with installation instructions
      - [x] Follows Home Assistant standards
@@ -275,11 +275,11 @@ Once approved:
 
 ```bash
 # Create and push a tag
-git tag -a v0.1.0 -m "Initial release"
-git push origin v0.1.0
+git tag -a v0.9.0 -m "Initial release"
+git push origin v0.9.0
 
 # Check what will be released
-git diff v0.1.0..HEAD
+git diff v0.9.0..HEAD
 
 # Create next version
 git tag -a v0.2.0 -m "Add feature X"
@@ -290,7 +290,7 @@ git push origin v0.2.0
 
 Before submitting to HACS:
 
-- [ ] Created v0.1.0 release on GitHub
+- [ ] Created v0.9.0 release on GitHub
 - [ ] Tested installation as custom repository
 - [ ] README has clear installation instructions
 - [ ] All features documented

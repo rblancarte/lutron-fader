@@ -26,19 +26,19 @@ git commit -m "Prepare for HACS submission
 git push origin main
 ```
 
-## 2. Create v0.1.0 Release
+## 2. Create v0.9.0 Release
 
 ```bash
 # Tag the release
-git tag -a v0.1.0 -m "Initial HACS release"
-git push origin v0.1.0
+git tag -a v0.9.0 -m "Initial HACS release"
+git push origin v0.9.0
 ```
 
 Then on GitHub (https://github.com/rblancarte/lutron-fader):
 1. Go to "Releases"
 2. Click "Draft a new release"
-3. Choose tag: `v0.1.0`
-4. Title: `v0.1.0 - Initial Release`
+3. Choose tag: `v0.9.0`
+4. Title: `v0.9.0 - Initial Release`
 5. Description: See HACS_SUBMISSION.md for template
 6. Click "Publish release"
 
@@ -112,7 +112,7 @@ Once everything works:
 - [x] `custom_components/lutron_fader/manifest.json` - Metadata
 - [x] `custom_components/lutron_fader/www/lutron-fader-card.js` - Custom card
 - [x] `examples/` - Dashboard examples
-- [ ] GitHub Release v0.1.0
+- [ ] GitHub Release v0.9.0
 - [ ] HACS submission PR
 - [ ] Testing on clean install
 
