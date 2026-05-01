@@ -374,18 +374,15 @@ class LutronTelnetConnection:
                 # Sometimes we get "OUTPUT,25,1,0.00" instead of "~OUTPUT,25,1,0.00"
                 if line.strip().startswith('OUTPUT,'):
                     parts = line.strip().split(',')
-                    # Check if it looks like an OUTPUT response (ID,action,brightness)
-                    if len(parts) >= 3:
+                    # parts: ['OUTPUT', zone_id, action, brightness]
+                    if len(parts) >= 4:
                         try:
-                            # Try parsing as zone_id, action, brightness
-                            int(parts[0])  # zone_id
-                            int(parts[1])  # action
-                            float(parts[2])  # brightness
-                            # This looks like a valid response, just add the ~ prefix
+                            int(parts[1])    # zone_id
+                            int(parts[2])    # action
+                            float(parts[3])  # brightness
                             _LOGGER.debug("Fixing malformed response (missing ~): %s", line.strip())
-                            return f"~OUTPUT,{line.strip()}"
+                            return f"~{line.strip()}"
                         except (ValueError, IndexError):
-                            # Not a valid response format
                             pass
 
             # No response found - return empty string for cleaner error handling
