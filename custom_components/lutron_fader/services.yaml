@@ -37,7 +37,7 @@ fade_to:
       selector:
         number:
           min: 0
-          max: 7200
+          max: 14400
 
 parse_integration_report:
   name: Parse Integration Report

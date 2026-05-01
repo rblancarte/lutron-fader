@@ -2,7 +2,9 @@ class LutronFaderCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._fadeTime = 0;
+    this._fadeHours = 0;
+    this._fadeMinutes = 0;
+    this._fadeSeconds = 0;
   }
 
   setConfig(config) {
@@ -170,6 +172,32 @@ class LutronFaderCard extends HTMLElement {
           font-size: 12px;
           margin-top: 4px;
         }
+        .time-input-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .time-input-row input[type="number"] {
+          flex: 1;
+          text-align: center;
+          padding: 12px 4px;
+        }
+        .time-input-row .time-sep {
+          font-size: 20px;
+          font-weight: 500;
+          color: var(--primary-text-color);
+        }
+        .time-unit {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          text-align: center;
+          margin-top: 2px;
+        }
+        .time-field {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+        }
       `;
       this.shadowRoot.appendChild(style);
     }
@@ -203,8 +231,23 @@ class LutronFaderCard extends HTMLElement {
         <div class="brightness-display"><span id="brightness-value">${brightnessPercent}</span>%</div>
       </div>
       <div class="fade-time-container">
-        <div class="fade-time-label">Fade Time (seconds, 0-3600)</div>
-        <input type="number" min="0" max="3600" value="${this._fadeTime}" id="fade-time-input" placeholder="Enter seconds (0-3600)">
+        <div class="fade-time-label">Fade Time (max 4 hours)</div>
+        <div class="time-input-row">
+          <div class="time-field">
+            <input type="number" min="0" max="4" value="${this._fadeHours}" id="fade-hours" placeholder="0">
+            <div class="time-unit">HH</div>
+          </div>
+          <span class="time-sep">:</span>
+          <div class="time-field">
+            <input type="number" min="0" max="59" value="${this._fadeMinutes}" id="fade-minutes" placeholder="0">
+            <div class="time-unit">MM</div>
+          </div>
+          <span class="time-sep">:</span>
+          <div class="time-field">
+            <input type="number" min="0" max="59" value="${this._fadeSeconds}" id="fade-seconds" placeholder="0">
+            <div class="time-unit">SS</div>
+          </div>
+        </div>
         <div id="fade-time-error" class="error" style="display: none;"></div>
       </div>
       <div class="button-container">
@@ -213,64 +256,59 @@ class LutronFaderCard extends HTMLElement {
       </div>
     `;
 
-    // Add event listeners
     const slider = this.content.querySelector('#brightness-slider');
     const brightnessDisplay = this.content.querySelector('#brightness-value');
-    const fadeTimeInput = this.content.querySelector('#fade-time-input');
+    const fadeHours = this.content.querySelector('#fade-hours');
+    const fadeMinutes = this.content.querySelector('#fade-minutes');
+    const fadeSeconds = this.content.querySelector('#fade-seconds');
     const fadeTimeError = this.content.querySelector('#fade-time-error');
     const startButton = this.content.querySelector('#start-button');
     const offButton = this.content.querySelector('#off-button');
+
+    const getFadeSeconds = () => {
+      const h = parseInt(fadeHours.value) || 0;
+      const m = parseInt(fadeMinutes.value) || 0;
+      const s = parseInt(fadeSeconds.value) || 0;
+      return h * 3600 + m * 60 + s;
+    };
+
+    const validateFadeTime = () => {
+      if (getFadeSeconds() > 14400) {
+        fadeTimeError.textContent = 'Fade time must not exceed 4 hours';
+        fadeTimeError.style.display = 'block';
+        return false;
+      }
+      fadeTimeError.style.display = 'none';
+      return true;
+    };
 
     slider.addEventListener('input', (e) => {
       brightnessDisplay.textContent = e.target.value;
     });
 
-    fadeTimeInput.addEventListener('input', (e) => {
-      const value = parseInt(e.target.value);
-      if (isNaN(value) || value < 0 || value > 3600) {
-        fadeTimeError.textContent = 'Fade time must be between 0 and 3600 seconds';
-        fadeTimeError.style.display = 'block';
-      } else {
-        fadeTimeError.style.display = 'none';
-        this._fadeTime = value;
-      }
+    [fadeHours, fadeMinutes, fadeSeconds].forEach(input => {
+      input.addEventListener('input', () => {
+        this._fadeHours = parseInt(fadeHours.value) || 0;
+        this._fadeMinutes = parseInt(fadeMinutes.value) || 0;
+        this._fadeSeconds = parseInt(fadeSeconds.value) || 0;
+        validateFadeTime();
+      });
     });
 
     startButton.addEventListener('click', () => {
-      const brightness = parseInt(slider.value);
-      const fadeTime = parseInt(fadeTimeInput.value) || 0;
-
-      if (fadeTime < 0 || fadeTime > 3600) {
-        fadeTimeError.textContent = 'Fade time must be between 0 and 3600 seconds';
-        fadeTimeError.style.display = 'block';
-        return;
-      }
-
-      fadeTimeError.style.display = 'none';
-
-      // Call the light.turn_on service with transition
+      if (!validateFadeTime()) return;
       this._hass.callService('light', 'turn_on', {
         entity_id: entityId,
-        brightness_pct: brightness,
-        transition: fadeTime
+        brightness_pct: parseInt(slider.value),
+        transition: getFadeSeconds()
       });
     });
 
     offButton.addEventListener('click', () => {
-      const fadeTime = parseInt(fadeTimeInput.value) || 0;
-
-      if (fadeTime < 0 || fadeTime > 3600) {
-        fadeTimeError.textContent = 'Fade time must be between 0 and 3600 seconds';
-        fadeTimeError.style.display = 'block';
-        return;
-      }
-
-      fadeTimeError.style.display = 'none';
-
-      // Call the light.turn_off service with transition
+      if (!validateFadeTime()) return;
       this._hass.callService('light', 'turn_off', {
         entity_id: entityId,
-        transition: fadeTime
+        transition: getFadeSeconds()
       });
     });
   }

@@ -6,6 +6,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, discovery, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
@@ -199,7 +200,11 @@ async def _async_setup_services(
             fade_time,
         )
 
-        await connection.set_light_level(zone_id, brightness, fade_time)
+        success = await connection.set_light_level(zone_id, brightness, fade_time)
+        if not success:
+            raise HomeAssistantError(
+                f"Lutron hub did not acknowledge fade command for zone {zone_id}"
+            )
 
     async def handle_discover_lutron_entities(call: ServiceCall) -> None:
         """Discover Lutron Caseta entities from the official integration."""

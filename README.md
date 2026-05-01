@@ -122,7 +122,7 @@ Or use the visual editor:
 
 - **Current State Display**: Shows ON/OFF status and current brightness
 - **Brightness Slider**: Select desired brightness (0-100%)
-- **Fade Time Input**: Enter fade duration (0-3600 seconds)
+- **Fade Time Input**: Enter fade duration (0-14400 seconds)
 - **Start Fade Button**: Execute the fade to selected brightness
 - **Turn Off Button**: Turn off light with specified fade time
 - **Input Validation**: Ensures fade time is within valid range
@@ -139,7 +139,7 @@ For complete dashboard configuration examples, see the [examples/](examples/) fo
 
 ### Service: `lutron_fader.fade_to`
 
-Fade a light to a specific brightness over time. Supports fade times from 0 to 7200 seconds (2 hours):
+Fade a light to a specific brightness over time. Supports fade times from 0 to 14400 seconds (4 hours):
 
 ```yaml
 service: lutron_fader.fade_to
@@ -156,7 +156,7 @@ service: lutron_fader.fade_to
 data:
   entity_id: light.master_bedroom_ron_lamp
   brightness: 0     # Turn off
-  fade_time: 3600   # 1 hour
+  fade_time: 3600   # 1 hour (max is 14400 = 4 hours)
 ```
 
 ## Example Automations
@@ -282,6 +282,10 @@ This integration is under active development. Contributions are welcome!
 - [ ] Multi-zone fade service
 - [ ] Fade cancellation
 - [ ] Better error handling and notifications
+- [ ] Retry logic on Telnet command failure
+- [ ] State polling (`should_poll`) so current brightness stays in sync
+- [ ] Wire up `discover_zones()` to zone configuration flow
+- [ ] Unit and integration tests
 
 ## Contributing
 

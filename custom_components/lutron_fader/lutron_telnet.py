@@ -5,17 +5,63 @@ from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-# Auto-disconnect after 5 minutes of inactivity
-DISCONNECT_TIMEOUT = 300  # seconds
+# Telnet defaults
+DEFAULT_TELNET_PORT = 23
 
-# Ping interval - query zone 1 every minute when connected
-PING_INTERVAL = 60  # seconds
+# Auto-disconnect / keep-alive
+DISCONNECT_TIMEOUT = 300   # seconds of inactivity before auto-disconnect
+PING_INTERVAL = 60         # seconds between keep-alive pings
+
+# Auth handshake timing
+LOGIN_TIMEOUT = 5.0        # seconds to wait for each login prompt
+READ_CHUNK_SIZE = 256      # bytes per read chunk in _expect
+
+# Command I/O timing
+RESPONSE_WAIT = 0.5        # seconds to wait after sending a command before reading
+READ_SETTLE_TIME = 0.1     # seconds for hub to finish sending before reading lines
+READ_LINE_TIMEOUT = 0.5    # per-line read timeout in _read_response
+
+# Zone discovery
+DEFAULT_MAX_ZONES = 100
+DISCOVERY_ZONE_DELAY = 0.1  # seconds between zone queries to avoid flooding the hub
+
+# Lutron Integration Protocol — OUTPUT action IDs
+# Used in #OUTPUT,<zone>,<action>[,<params>] and ?OUTPUT,<zone>,<action>
+#
+# Action | Supports  | Name                            | Parameters
+# -------+-----------+---------------------------------+-------------------------------------
+#   1    | Set, Get  | Zone Level                      | level (0–100), fade (s), delay (s)
+#   2    | Set       | Start Raising                   | —
+#   3    | Set       | Start Lowering                  | —
+#   4    | Set       | Stop Raising or Lowering        | —
+#   5    | Set       | Start Flashing                  | fade (s)
+#   6    | Set       | Pulse Time                      | fade (s)
+#   9    | Set, Get  | Tilt Level                      | tilt (0–100), fade (s), delay (s)
+#  10    | Set, Get  | Lift & Tilt Level               | lift (0–100), tilt (0–100), fade, delay
+#  11    | Set       | Start Raising Tilt              | —
+#  12    | Set       | Start Lowering Tilt             | —
+#  13    | Set       | Stop Raising or Lowering Tilt   | —
+#  14    | Set       | Start Raising Lift              | —
+#  15    | Set       | Start Lowering Lift             | —
+#  16    | Set       | Stop Raising or Lowering Lift   | —
+#  17    | Set       | DMX Color or Level              | color/level index (0–255 / 0.00–100.00)
+#  18    | Set       | Motor Jog Raise                 | —
+#  19    | Set       | Motor Jog Lower                 | —
+#  20    | Set       | Motor 4-Stage Jog Raise         | —
+#  21    | Set       | Motor 4-Stage Jog Lower         | —
+#
+# Notes:
+#   Actions 9–16 not supported in Quantum
+#   Actions 11–16 not supported in Athena
+#   Action 17 not supported in RadioRA 2
+#   Action numbers 7 and 8 are not OUTPUT actions
+OUTPUT_ACTION_ZONE_LEVEL = 1
 
 
 class LutronTelnetConnection:
     """Manages Telnet connection to Lutron Caseta Pro hub with auto-disconnect."""
 
-    def __init__(self, host: str, port: int = 23, username: str = "lutron", password: str = "integration", ping_zone: int = 1):
+    def __init__(self, host: str, port: int = DEFAULT_TELNET_PORT, username: str = "lutron", password: str = "integration", ping_zone: int = 1):
         """Initialize the Telnet connection.
 
         Args:
@@ -37,6 +83,20 @@ class LutronTelnetConnection:
         self._ping_timer: Optional[asyncio.Task] = None
         self._connect_lock = asyncio.Lock()  # Prevent concurrent connection attempts
         self._command_lock = asyncio.Lock()  # Serialize command/response cycles
+
+    async def _expect(self, token: bytes, timeout: float = 5.0) -> None:
+        """Read from the hub until `token` appears, raising on timeout or bad credentials."""
+        buf = b""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while token not in buf:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(f"Timed out waiting for {token!r}")
+            chunk = await asyncio.wait_for(self._reader.read(READ_CHUNK_SIZE), timeout=remaining)
+            if not chunk:
+                raise ConnectionError(f"Connection closed while waiting for {token!r}")
+            buf += chunk
+        _LOGGER.debug("Received expected token %r", token)
 
     async def connect(self) -> bool:
         """Establish connection to the Lutron hub.
@@ -60,18 +120,18 @@ class LutronTelnetConnection:
                     self.host, self.port
                 )
 
-                # Wait for login prompt and send username
-                await asyncio.sleep(1)
+                # Wait for login prompt, then send username
+                await self._expect(b"login:", timeout=LOGIN_TIMEOUT)
                 self._writer.write(f"{self.username}\r\n".encode())
                 await self._writer.drain()
 
-                # Wait and send password
-                await asyncio.sleep(1)
+                # Wait for password prompt, then send password
+                await self._expect(b"password:", timeout=LOGIN_TIMEOUT)
                 self._writer.write(f"{self.password}\r\n".encode())
                 await self._writer.drain()
 
-                # Give it a moment to authenticate
-                await asyncio.sleep(1)
+                # Wait for GNET> prompt — confirms credentials accepted
+                await self._expect(b"GNET>", timeout=LOGIN_TIMEOUT)
 
                 self._connected = True
                 _LOGGER.info("Successfully connected to Lutron hub at %s", self.host)
@@ -191,19 +251,18 @@ class LutronTelnetConnection:
             return
 
         try:
-            command = f"?OUTPUT,{self.ping_zone},1"
+            command = f"?OUTPUT,{self.ping_zone},{OUTPUT_ACTION_ZONE_LEVEL}"
             _LOGGER.debug("Sending ping: %s", command)
 
-            # Send the command directly without calling send_command()
-            # This way we don't reset the disconnect timer
-            self._writer.write(f"{command}\r\n".encode())
-            await self._writer.drain()
+            async with self._command_lock:
+                self._writer.write(f"{command}\r\n".encode())
+                await self._writer.drain()
 
-            # Wait a moment for the response
-            await asyncio.sleep(0.5)
+                # Wait a moment for the response
+                await asyncio.sleep(RESPONSE_WAIT)
 
-            # Read the response
-            response = await self._read_response()
+                # Read the response
+                response = await self._read_response()
             if response and response.startswith("~OUTPUT"):
                 try:
                     # Parse the brightness from response
@@ -251,12 +310,16 @@ class LutronTelnetConnection:
             try:
                 _LOGGER.debug("Sending command: %s", command)
 
+                if not self._writer:
+                    _LOGGER.error("Writer is None after connect — concurrent disconnect?")
+                    return None
+
                 # Send the command (like: echo "#OUTPUT,25,1,0,30:00")
                 self._writer.write(f"{command}\r\n".encode())
                 await self._writer.drain()
 
                 # Wait a moment for the response
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(RESPONSE_WAIT)
 
                 # Read the response
                 response = await self._read_response()
@@ -278,7 +341,7 @@ class LutronTelnetConnection:
         """
         try:
             # Read all available data (there may be multiple lines with prompts)
-            await asyncio.sleep(0.1)  # Give the hub time to send all data
+            await asyncio.sleep(READ_SETTLE_TIME)
 
             # Read everything available
             full_response = ""
@@ -286,7 +349,7 @@ class LutronTelnetConnection:
                 try:
                     data = await asyncio.wait_for(
                         self._reader.readuntil(b'\n'),
-                        timeout=0.5
+                        timeout=READ_LINE_TIMEOUT
                     )
                     full_response += data.decode()
                 except asyncio.TimeoutError:
@@ -309,7 +372,7 @@ class LutronTelnetConnection:
 
                 # Handle partial response that's missing the ~ prefix
                 # Sometimes we get "OUTPUT,25,1,0.00" instead of "~OUTPUT,25,1,0.00"
-                if line.strip() and ',' in line:
+                if line.strip().startswith('OUTPUT,'):
                     parts = line.strip().split(',')
                     # Check if it looks like an OUTPUT response (ID,action,brightness)
                     if len(parts) >= 3:
@@ -349,7 +412,7 @@ class LutronTelnetConnection:
             True if command sent successfully, False otherwise
         """
         # Format: #OUTPUT,<zone_id>,1,<brightness>,<fade_time>
-        command = f"#OUTPUT,{zone_id},1,{brightness},{fade_time}"
+        command = f"#OUTPUT,{zone_id},{OUTPUT_ACTION_ZONE_LEVEL},{brightness},{fade_time}"
 
         _LOGGER.info(
             "Setting zone %s to %s%% with %s second fade",
@@ -380,7 +443,7 @@ class LutronTelnetConnection:
             Current brightness (0-100), or None if error
         """
         # Format: ?OUTPUT,<zone_id>,1
-        command = f"?OUTPUT,{zone_id},1"
+        command = f"?OUTPUT,{zone_id},{OUTPUT_ACTION_ZONE_LEVEL}"
 
         _LOGGER.debug("Querying zone %s level", zone_id)
 
@@ -407,7 +470,7 @@ class LutronTelnetConnection:
         """Return whether we're connected to the hub."""
         return self._connected
 
-    async def discover_zones(self, max_zones: int = 100) -> dict[int, str]:
+    async def discover_zones(self, max_zones: int = DEFAULT_MAX_ZONES) -> dict[int, str]:
         """Discover all available zones on the Lutron hub.
 
         Queries zones sequentially to find which ones exist.
@@ -432,8 +495,7 @@ class LutronTelnetConnection:
                 _LOGGER.info("Discovered zone %s: %s (current brightness: %s%%)",
                            zone_id, zone_name, brightness)
 
-            # Small delay to avoid flooding the hub
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(DISCOVERY_ZONE_DELAY)
 
         _LOGGER.info("Discovery complete - found %s zones", len(discovered_zones))
         return discovered_zones

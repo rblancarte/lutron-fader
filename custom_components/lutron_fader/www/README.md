@@ -29,7 +29,7 @@ Or use the visual editor and search for "Lutron Fader Card"
 
 - Display current light state (ON/OFF) and brightness
 - Slider to select desired brightness (0-100%)
-- Fade time input (0-3600 seconds)
+- Fade time input (0-14400 seconds)
 - Start Fade button to execute the transition
 - Turn Off button with fade time support
 - Input validation for fade time
