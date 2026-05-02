@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 _STUBS = [
     "homeassistant",
     "homeassistant.components",
+    "homeassistant.components.http",
     "homeassistant.components.light",
     "homeassistant.config_entries",
     "homeassistant.const",
@@ -18,6 +19,7 @@ _STUBS = [
     "homeassistant.helpers.discovery",
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.entity_registry",
+    "homeassistant.helpers.event",
     "homeassistant.helpers.typing",
 ]
 
@@ -33,9 +35,13 @@ light_mod = sys.modules["homeassistant.components.light"]
 light_mod.ATTR_BRIGHTNESS = "brightness"
 light_mod.ATTR_TRANSITION = "transition"
 light_mod.ColorMode = ColorMode
+light_mod.LightEntityFeature = MagicMock(TRANSITION=32)
 light_mod.LightEntity = object
 light_mod.PLATFORM_SCHEMA = MagicMock()
 light_mod.PLATFORM_SCHEMA.extend = MagicMock(return_value=MagicMock())
+
+core_mod = sys.modules["homeassistant.core"]
+core_mod.callback = lambda fn: fn  # identity decorator — HA uses it as a marker only
 
 const_mod = sys.modules["homeassistant.const"]
 const_mod.CONF_NAME = "name"
