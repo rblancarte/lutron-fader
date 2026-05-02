@@ -3,6 +3,7 @@ import logging
 
 import voluptuous as vol
 
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -136,6 +137,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Forward the setup to the light platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Connect eagerly so the reader loop starts at boot
+    await connection.connect()
 
     return True
 
@@ -600,11 +604,9 @@ async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
     www_path = os.path.join(os.path.dirname(__file__), "www")
 
     # Register the Lovelace resource
-    hass.http.register_static_path(
-        f"/lutron_fader_static",
-        www_path,
-        cache_headers=False,
-    )
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(f"/lutron_fader_static", www_path, cache_headers=False)
+    ])
 
     _LOGGER.info(
         "Lutron Fader card available at: /lutron_fader_static/lutron-fader-card.js"

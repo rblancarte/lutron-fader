@@ -18,7 +18,7 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 import voluptuous as vol
 
 from .const import DOMAIN
-from .lutron_telnet import LutronTelnetConnection
+from .lutron_telnet import LutronTelnetConnection, SOURCE_INTERNAL, SOURCE_EXTERNAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +183,40 @@ class LutronFaderLight(LightEntity):
         # State tracking
         self._attr_is_on = False
         self._attr_brightness = 0
+
+    async def async_added_to_hass(self) -> None:
+        """Register push callback when entity is added."""
+        self._connection.add_push_callback(self._handle_push)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister push callback when entity is removed."""
+        self._connection.remove_push_callback(self._handle_push)
+
+    def _handle_push(self, line: str, source: str) -> None:
+        """Handle a push event from the hub."""
+        if not line.startswith("~OUTPUT"):
+            return
+
+        parts = line.split(",")
+        if len(parts) < 4:
+            return
+
+        try:
+            zone_id = int(parts[1])
+            level = float(parts[3])
+        except (ValueError, IndexError):
+            return
+
+        if zone_id != self._zone_id:
+            return
+
+        self._attr_is_on = level > 0
+        self._attr_brightness = int((level / 100.0) * 255)
+
+        if source == SOURCE_EXTERNAL:
+            _LOGGER.debug("Zone %s external update: %.2f%%", zone_id, level)
+
+        self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Update the light state."""

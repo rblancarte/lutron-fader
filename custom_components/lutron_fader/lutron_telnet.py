@@ -8,8 +8,7 @@ _LOGGER = logging.getLogger(__name__)
 # Telnet defaults
 DEFAULT_TELNET_PORT = 23
 
-# Auto-disconnect / keep-alive
-DISCONNECT_TIMEOUT = 300   # seconds of inactivity before auto-disconnect
+# Keep-alive
 PING_INTERVAL = 60         # seconds between keep-alive pings
 
 # Auth handshake timing
@@ -17,9 +16,7 @@ LOGIN_TIMEOUT = 5.0        # seconds to wait for each login prompt
 READ_CHUNK_SIZE = 256      # bytes per read chunk in _expect
 
 # Command I/O timing
-RESPONSE_WAIT = 0.5        # seconds to wait after sending a command before reading
-READ_SETTLE_TIME = 0.1     # seconds for hub to finish sending before reading lines
-READ_LINE_TIMEOUT = 0.5    # per-line read timeout in _read_response
+READ_LINE_TIMEOUT = 0.5    # per-line read timeout in _reader_loop
 
 # Zone discovery
 DEFAULT_MAX_ZONES = 100
@@ -57,6 +54,10 @@ DISCOVERY_ZONE_DELAY = 0.1  # seconds between zone queries to avoid flooding the
 #   Action numbers 7 and 8 are not OUTPUT actions
 OUTPUT_ACTION_ZONE_LEVEL = 1
 
+# Push event source tags
+SOURCE_INTERNAL = "internal"  # ~OUTPUT echoed back from a command we sent
+SOURCE_EXTERNAL = "external"  # unsolicited push from Pico, app, or another system
+
 
 class LutronTelnetConnection:
     """Manages Telnet connection to Lutron Caseta Pro hub with auto-disconnect."""
@@ -79,10 +80,28 @@ class LutronTelnetConnection:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._connected = False
-        self._disconnect_timer: Optional[asyncio.Task] = None
         self._ping_timer: Optional[asyncio.Task] = None
+        self._reader_task: Optional[asyncio.Task] = None
+        self._pending_response: Optional[asyncio.Future] = None
+        self._push_callbacks: list = []
         self._connect_lock = asyncio.Lock()  # Prevent concurrent connection attempts
         self._command_lock = asyncio.Lock()  # Serialize command/response cycles
+
+    def add_push_callback(self, callback) -> None:
+        """Register a callback for push events from the hub."""
+        self._push_callbacks.append(callback)
+
+    def remove_push_callback(self, callback) -> None:
+        """Unregister a push event callback."""
+        self._push_callbacks.remove(callback)
+
+    async def _dispatch_push(self, line: str, source: str) -> None:
+        """Dispatch a push event line to all registered callbacks."""
+        for callback in self._push_callbacks:
+            try:
+                callback(line, source)
+            except Exception as e:
+                _LOGGER.error("Push callback error: %s", e)
 
     async def _expect(self, token: bytes, timeout: float = 5.0) -> None:
         """Read from the hub until `token` appears, raising on timeout or bad credentials."""
@@ -108,8 +127,7 @@ class LutronTelnetConnection:
         async with self._connect_lock:
             # If already connected, just reset the timer
             if self._connected:
-                _LOGGER.debug("Already connected, resetting disconnect timer")
-                self._reset_disconnect_timer()
+                _LOGGER.debug("Already connected")
                 return True
 
             try:
@@ -136,11 +154,9 @@ class LutronTelnetConnection:
                 self._connected = True
                 _LOGGER.info("Successfully connected to Lutron hub at %s", self.host)
 
-                # Start the auto-disconnect timer
-                self._reset_disconnect_timer()
-
-                # Start the ping timer
+                # Start background tasks
                 self._start_ping_timer()
+                self._start_reader_task()
 
                 return True
 
@@ -151,15 +167,13 @@ class LutronTelnetConnection:
 
     async def disconnect(self) -> None:
         """Close the Telnet connection."""
-        # Cancel the auto-disconnect timer
-        if self._disconnect_timer:
-            self._disconnect_timer.cancel()
-            self._disconnect_timer = None
-
-        # Cancel the ping timer
+        # Cancel background tasks
         if self._ping_timer:
             self._ping_timer.cancel()
             self._ping_timer = None
+        if self._reader_task:
+            self._reader_task.cancel()
+            self._reader_task = None
 
         if self._writer:
             _LOGGER.debug("Disconnecting from Lutron hub")
@@ -175,38 +189,8 @@ class LutronTelnetConnection:
                 self._reader = None
                 _LOGGER.info("Disconnected from Lutron hub")
 
-    def _reset_disconnect_timer(self) -> None:
-        """Reset the auto-disconnect timer.
-
-        Called whenever a command is sent to keep the connection alive.
-        """
-        # Cancel existing timer if any
-        if self._disconnect_timer:
-            self._disconnect_timer.cancel()
-
-        # Create new timer
-        self._disconnect_timer = asyncio.create_task(self._auto_disconnect())
-        _LOGGER.debug("Disconnect timer reset to %s seconds", DISCONNECT_TIMEOUT)
-
-    async def _auto_disconnect(self) -> None:
-        """Auto-disconnect after timeout period.
-
-        This runs in the background and disconnects if no commands are sent.
-        """
-        try:
-            await asyncio.sleep(DISCONNECT_TIMEOUT)
-            _LOGGER.info("Auto-disconnecting after %s seconds of inactivity", DISCONNECT_TIMEOUT)
-            await self.disconnect()
-        except asyncio.CancelledError:
-            # Timer was cancelled (new command came in), this is normal
-            pass
-
     def _start_ping_timer(self) -> None:
-        """Start the ping timer to query zone 1 every minute.
-
-        The ping does NOT reset the disconnect timer, so the connection
-        will still auto-disconnect after 5 minutes of user inactivity.
-        """
+        """Start the ping timer to query zone 1 every minute."""
         # Cancel existing timer if any
         if self._ping_timer:
             self._ping_timer.cancel()
@@ -228,11 +212,64 @@ class LutronTelnetConnection:
         self._ping_timer = asyncio.create_task(self._ping_loop())
         _LOGGER.debug("Ping timer reset to %s seconds", PING_INTERVAL)
 
-    async def _ping_loop(self) -> None:
-        """Continuously ping zone 1 to monitor connection status.
+    def _start_reader_task(self) -> None:
+        """Start the background reader task."""
+        if self._reader_task:
+            self._reader_task.cancel()
+        self._reader_task = asyncio.create_task(self._reader_loop())
+        _LOGGER.debug("Reader task started")
 
-        This does NOT reset the disconnect timer.
+    async def _reader_loop(self) -> None:
+        """Continuously read lines from the hub socket.
+
+        Sole consumer of self._reader. Routes ~OUTPUT/~ERROR lines to
+        _pending_response if a command is waiting, otherwise dispatches
+        as a push event.
         """
+        try:
+            while self._connected and self._reader:
+                try:
+                    data = await asyncio.wait_for(
+                        self._reader.readuntil(b'\n'),
+                        timeout=READ_LINE_TIMEOUT
+                    )
+                    line = data.decode(errors="replace").strip()
+                    if not line or line == "GNET>":
+                        continue
+
+                    _LOGGER.debug("HUB >> %s", line)
+
+                    # Strip GNET> prompt that sometimes prefixes the response
+                    if "GNET>" in line:
+                        line = line.split("GNET>")[-1].strip()
+
+                    if not line:
+                        continue
+
+                    is_response = line.startswith("~OUTPUT") or line.startswith("~ERROR")
+
+                    if is_response and self._pending_response and not self._pending_response.done():
+                        self._pending_response.set_result(line)
+                        await self._dispatch_push(line, SOURCE_INTERNAL)
+                    else:
+                        _LOGGER.debug("HUB PUSH >> %s", line)
+                        await self._dispatch_push(line, SOURCE_EXTERNAL)
+
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.IncompleteReadError:
+                    _LOGGER.warning("Hub closed the connection unexpectedly")
+                    self._connected = False
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            _LOGGER.error("Reader loop error: %s", e)
+        finally:
+            _LOGGER.debug("Reader loop exited")
+
+    async def _ping_loop(self) -> None:
+        """Continuously ping zone 1 to monitor connection status."""
         try:
             while self._connected:
                 await asyncio.sleep(PING_INTERVAL)
@@ -258,11 +295,7 @@ class LutronTelnetConnection:
                 self._writer.write(f"{command}\r\n".encode())
                 await self._writer.drain()
 
-                # Wait a moment for the response
-                await asyncio.sleep(RESPONSE_WAIT)
-
-                # Read the response
-                response = await self._read_response()
+                response = await self._await_response()
             if response and response.startswith("~OUTPUT"):
                 try:
                     # Parse the brightness from response
@@ -301,9 +334,6 @@ class LutronTelnetConnection:
         # Use a lock to serialize command/response cycles
         # This prevents multiple coroutines from reading the same stream simultaneously
         async with self._command_lock:
-            # Reset the disconnect timer since we're sending a command
-            self._reset_disconnect_timer()
-
             # Reset the ping timer to avoid redundant ping right after a command
             self._reset_ping_timer()
 
@@ -318,11 +348,8 @@ class LutronTelnetConnection:
                 self._writer.write(f"{command}\r\n".encode())
                 await self._writer.drain()
 
-                # Wait a moment for the response
-                await asyncio.sleep(RESPONSE_WAIT)
-
-                # Read the response
-                response = await self._read_response()
+                # Wait for _reader_loop to deliver the response
+                response = await self._await_response()
                 _LOGGER.debug("Received response: %s", response)
 
                 return response
@@ -333,65 +360,20 @@ class LutronTelnetConnection:
                 await self.disconnect()
                 return None
 
-    async def _read_response(self) -> str:
-        """Read response from the hub.
+    async def _await_response(self, timeout: float = 5.0) -> str:
+        """Wait for _reader_loop to deliver the next command response.
 
-        Returns:
-            The response string from the hub (cleaned of prompts)
+        Sets _pending_response so the reader loop knows to route the next
+        ~OUTPUT or ~ERROR line here instead of treating it as a push event.
         """
+        self._pending_response = asyncio.get_event_loop().create_future()
         try:
-            # Read all available data (there may be multiple lines with prompts)
-            await asyncio.sleep(READ_SETTLE_TIME)
-
-            # Read everything available
-            full_response = ""
-            while True:
-                try:
-                    data = await asyncio.wait_for(
-                        self._reader.readuntil(b'\n'),
-                        timeout=READ_LINE_TIMEOUT
-                    )
-                    full_response += data.decode()
-                except asyncio.TimeoutError:
-                    # No more data available
-                    break
-
-            # Look for the actual response (starts with ~ or #)
-            # The response may be mixed with prompts like "login: password: GNET> ~OUTPUT,..."
-            for line in full_response.split('\n'):
-                # Find lines that contain actual responses (not prompts)
-                if '~OUTPUT' in line or '~DEVICE' in line:
-                    # Extract just the response part (after the last prompt)
-                    if 'GNET>' in line:
-                        # Response is after the GNET> prompt
-                        response = line.split('GNET>')[-1].strip()
-                        return response
-                    else:
-                        # Just return the cleaned line
-                        return line.strip()
-
-                # Handle partial response that's missing the ~ prefix
-                # Sometimes we get "OUTPUT,25,1,0.00" instead of "~OUTPUT,25,1,0.00"
-                if line.strip().startswith('OUTPUT,'):
-                    parts = line.strip().split(',')
-                    # parts: ['OUTPUT', zone_id, action, brightness]
-                    if len(parts) >= 4:
-                        try:
-                            int(parts[1])    # zone_id
-                            int(parts[2])    # action
-                            float(parts[3])  # brightness
-                            _LOGGER.debug("Fixing malformed response (missing ~): %s", line.strip())
-                            return f"~{line.strip()}"
-                        except (ValueError, IndexError):
-                            pass
-
-            # No response found - return empty string for cleaner error handling
-            _LOGGER.debug("No valid response found in: %s", full_response)
+            return await asyncio.wait_for(self._pending_response, timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.debug("Timed out waiting for hub response")
             return ""
-
-        except Exception as e:
-            _LOGGER.error("Error reading response: %s", e)
-            return ""
+        finally:
+            self._pending_response = None
 
     async def set_light_level(
         self, zone_id: int, brightness: int, fade_time: int = 0

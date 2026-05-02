@@ -1,24 +1,24 @@
 """Tests for LutronTelnetConnection."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_components', 'lutron_fader'))
 
-from custom_components.lutron_fader.lutron_telnet import LutronTelnetConnection
+from lutron_telnet import LutronTelnetConnection
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_reader(*chunks: bytes) -> AsyncMock:
-    """Return a mock StreamReader that yields chunks sequentially."""
+def make_reader(*lines: bytes) -> AsyncMock:
+    """Return a mock StreamReader that yields lines then TimeoutError."""
     reader = AsyncMock()
-    reader.read = AsyncMock(side_effect=list(chunks))
-    reader.readuntil = AsyncMock(side_effect=list(chunks))
+    reader.read = AsyncMock(side_effect=list(lines))
+    reader.readuntil = AsyncMock(side_effect=list(lines) + [asyncio.TimeoutError])
     return reader
 
 
@@ -57,7 +57,6 @@ class TestExpect:
     async def test_timeout_raises(self):
         conn = make_connection()
         conn._reader = AsyncMock()
-        # Always return data that doesn't contain the token
         conn._reader.read = AsyncMock(side_effect=asyncio.TimeoutError)
         with pytest.raises((asyncio.TimeoutError, Exception)):
             await conn._expect(b"login:", timeout=0.1)
@@ -81,11 +80,11 @@ class TestConnect:
         conn = make_connection()
         reader = AsyncMock()
         writer = make_writer()
-
-        # Feed login:, password:, GNET> prompts
         reader.read = AsyncMock(side_effect=[b"login: ", b"password: ", b"GNET> "])
 
-        with patch("asyncio.open_connection", return_value=(reader, writer)):
+        with patch("asyncio.open_connection", return_value=(reader, writer)), \
+             patch.object(conn, '_start_ping_timer'), \
+             patch.object(conn, '_start_reader_task'):
             result = await conn.connect()
 
         assert result is True
@@ -96,8 +95,6 @@ class TestConnect:
         conn = make_connection()
         reader = AsyncMock()
         writer = make_writer()
-
-        # Hub closes connection after password (empty = EOF)
         reader.read = AsyncMock(side_effect=[b"login: ", b"password: ", b""])
 
         with patch("asyncio.open_connection", return_value=(reader, writer)):
@@ -120,14 +117,9 @@ class TestConnect:
         conn = make_connection()
         conn._connected = True
         conn._writer = make_writer()
-        conn._disconnect_timer = MagicMock()
-        conn._disconnect_timer.cancel = MagicMock()
 
-        with patch.object(conn, '_reset_disconnect_timer') as mock_reset:
-            result = await conn.connect()
-
+        result = await conn.connect()
         assert result is True
-        mock_reset.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_sends_username_and_password(self):
@@ -136,7 +128,9 @@ class TestConnect:
         writer = make_writer()
         reader.read = AsyncMock(side_effect=[b"login: ", b"password: ", b"GNET> "])
 
-        with patch("asyncio.open_connection", return_value=(reader, writer)):
+        with patch("asyncio.open_connection", return_value=(reader, writer)), \
+             patch.object(conn, '_start_ping_timer'), \
+             patch.object(conn, '_start_reader_task'):
             await conn.connect()
 
         written = b"".join(c.args[0] for c in writer.write.call_args_list)
@@ -163,25 +157,157 @@ class TestDisconnect:
         assert conn._reader is None
 
     @pytest.mark.asyncio
-    async def test_disconnect_cancels_timers(self):
+    async def test_disconnect_cancels_tasks(self):
         conn = make_connection()
         conn._connected = True
         conn._writer = make_writer()
 
-        disconnect_timer = MagicMock()
         ping_timer = MagicMock()
-        conn._disconnect_timer = disconnect_timer
+        reader_task = MagicMock()
         conn._ping_timer = ping_timer
+        conn._reader_task = reader_task
 
         await conn.disconnect()
 
-        disconnect_timer.cancel.assert_called_once()
         ping_timer.cancel.assert_called_once()
+        reader_task.cancel.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_disconnect_when_not_connected_is_safe(self):
         conn = make_connection()
         await conn.disconnect()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# _await_response
+# ---------------------------------------------------------------------------
+
+class TestAwaitResponse:
+    @pytest.mark.asyncio
+    async def test_resolves_when_future_set(self):
+        conn = make_connection()
+
+        async def set_result():
+            await asyncio.sleep(0.05)
+            if conn._pending_response and not conn._pending_response.done():
+                conn._pending_response.set_result("~OUTPUT,5,1,50.00")
+
+        asyncio.create_task(set_result())
+        result = await conn._await_response(timeout=1.0)
+        assert result == "~OUTPUT,5,1,50.00"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_timeout(self):
+        conn = make_connection()
+        result = await conn._await_response(timeout=0.05)
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_clears_pending_response_after_timeout(self):
+        conn = make_connection()
+        await conn._await_response(timeout=0.05)
+        assert conn._pending_response is None
+
+    @pytest.mark.asyncio
+    async def test_clears_pending_response_after_resolve(self):
+        conn = make_connection()
+
+        async def set_result():
+            await asyncio.sleep(0.05)
+            if conn._pending_response and not conn._pending_response.done():
+                conn._pending_response.set_result("~OUTPUT,5,1,100.00")
+
+        asyncio.create_task(set_result())
+        await conn._await_response(timeout=1.0)
+        assert conn._pending_response is None
+
+
+# ---------------------------------------------------------------------------
+# _reader_loop
+# ---------------------------------------------------------------------------
+
+class TestReaderLoop:
+    async def _run_loop_with_lines(self, conn, lines: list[bytes]):
+        """Feed lines into the reader loop then stop it."""
+        conn._reader = AsyncMock()
+        conn._connected = True
+
+        # After all lines, raise CancelledError to stop the loop cleanly
+        conn._reader.readuntil = AsyncMock(
+            side_effect=lines + [asyncio.CancelledError]
+        )
+        try:
+            await conn._reader_loop()
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_routes_output_to_pending_future(self):
+        conn = make_connection()
+        future = asyncio.get_event_loop().create_future()
+        conn._pending_response = future
+
+        await self._run_loop_with_lines(conn, [b"~OUTPUT,5,1,50.00\n"])
+
+        assert future.done()
+        assert future.result() == "~OUTPUT,5,1,50.00"
+
+    @pytest.mark.asyncio
+    async def test_routes_error_to_pending_future(self):
+        conn = make_connection()
+        future = asyncio.get_event_loop().create_future()
+        conn._pending_response = future
+
+        await self._run_loop_with_lines(conn, [b"~ERROR\n"])
+
+        assert future.done()
+        assert future.result() == "~ERROR"
+
+    @pytest.mark.asyncio
+    async def test_push_event_does_not_resolve_future(self):
+        """Unsolicited ~OUTPUT with no pending future should not crash."""
+        conn = make_connection()
+        conn._pending_response = None
+
+        # Should complete without error
+        await self._run_loop_with_lines(conn, [b"~OUTPUT,5,1,75.00\n"])
+
+    @pytest.mark.asyncio
+    async def test_skips_bare_gnet_prompt(self):
+        conn = make_connection()
+        future = asyncio.get_event_loop().create_future()
+        conn._pending_response = future
+
+        # Bare GNET> line should be skipped; ~OUTPUT resolves the future
+        await self._run_loop_with_lines(conn, [b"GNET>\n", b"~OUTPUT,5,1,25.00\n"])
+
+        assert future.done()
+        assert future.result() == "~OUTPUT,5,1,25.00"
+
+    @pytest.mark.asyncio
+    async def test_strips_gnet_prefix_from_response(self):
+        conn = make_connection()
+        future = asyncio.get_event_loop().create_future()
+        conn._pending_response = future
+
+        # GNET> prefixed on the same line as ~OUTPUT
+        await self._run_loop_with_lines(conn, [b"GNET> ~OUTPUT,5,1,100.00\n"])
+
+        assert future.done()
+        assert future.result() == "~OUTPUT,5,1,100.00"
+
+    @pytest.mark.asyncio
+    async def test_incomplete_read_sets_disconnected(self):
+        conn = make_connection()
+        conn._connected = True
+        conn._reader = AsyncMock()
+        conn._reader.readuntil = AsyncMock(
+            side_effect=asyncio.IncompleteReadError(b"", 1)
+        )
+
+        await conn._reader_loop()
+
+        assert conn._connected is False
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +321,8 @@ class TestSendCommand:
         conn._connected = True
         conn._writer = make_writer()
 
-        with patch.object(conn, '_reset_disconnect_timer'), \
-             patch.object(conn, '_reset_ping_timer'), \
-             patch.object(conn, '_read_response', return_value="~OUTPUT,25,1,50.00"):
+        with patch.object(conn, '_reset_ping_timer'), \
+             patch.object(conn, '_await_response', return_value="~OUTPUT,25,1,50.00"):
             await conn.send_command("#OUTPUT,25,1,50,0")
 
         written = b"".join(c.args[0] for c in conn._writer.write.call_args_list)
@@ -218,10 +343,9 @@ class TestSendCommand:
     async def test_null_writer_returns_none(self):
         conn = make_connection()
         conn._connected = True
-        conn._writer = None  # Simulate concurrent disconnect
+        conn._writer = None
 
-        with patch.object(conn, '_reset_disconnect_timer'), \
-             patch.object(conn, '_reset_ping_timer'):
+        with patch.object(conn, '_reset_ping_timer'):
             result = await conn.send_command("#OUTPUT,25,1,50,0")
 
         assert result is None
@@ -233,73 +357,12 @@ class TestSendCommand:
         conn._writer = make_writer()
         conn._writer.drain = AsyncMock(side_effect=OSError("broken pipe"))
 
-        with patch.object(conn, '_reset_disconnect_timer'), \
-             patch.object(conn, '_reset_ping_timer'), \
+        with patch.object(conn, '_reset_ping_timer'), \
              patch.object(conn, 'disconnect') as mock_disconnect:
             result = await conn.send_command("#OUTPUT,25,1,50,0")
 
         mock_disconnect.assert_called_once()
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _read_response
-# ---------------------------------------------------------------------------
-
-class TestReadResponse:
-    def _make_conn_with_lines(self, *lines: bytes) -> LutronTelnetConnection:
-        conn = make_connection()
-        conn._reader = AsyncMock()
-        # Each line is returned by readuntil, then TimeoutError to end the loop
-        conn._reader.readuntil = AsyncMock(
-            side_effect=list(lines) + [asyncio.TimeoutError]
-        )
-        return conn
-
-    @pytest.mark.asyncio
-    async def test_normal_output_response(self):
-        conn = self._make_conn_with_lines(b"~OUTPUT,25,1,50.00\n")
-        result = await conn._read_response()
-        assert result == "~OUTPUT,25,1,50.00"
-
-    @pytest.mark.asyncio
-    async def test_output_after_gnet_prompt(self):
-        conn = self._make_conn_with_lines(b"GNET> ~OUTPUT,25,1,75.00\n")
-        result = await conn._read_response()
-        assert result == "~OUTPUT,25,1,75.00"
-
-    @pytest.mark.asyncio
-    async def test_device_response(self):
-        conn = self._make_conn_with_lines(b"~DEVICE,1,2,3\n")
-        result = await conn._read_response()
-        assert result == "~DEVICE,1,2,3"
-
-    @pytest.mark.asyncio
-    async def test_malformed_output_missing_tilde(self):
-        conn = self._make_conn_with_lines(b"OUTPUT,25,1,50.00\n")
-        result = await conn._read_response()
-        assert result == "~OUTPUT,25,1,50.00"
-
-    @pytest.mark.asyncio
-    async def test_garbage_returns_empty_string(self):
-        conn = self._make_conn_with_lines(b"GNET> \n", b"some garbage\n")
-        result = await conn._read_response()
-        assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_empty_response_returns_empty_string(self):
-        conn = make_connection()
-        conn._reader = AsyncMock()
-        conn._reader.readuntil = AsyncMock(side_effect=asyncio.TimeoutError)
-        result = await conn._read_response()
-        assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_non_output_csv_not_matched(self):
-        # A line like "25,50,garbage" that looks numeric but isn't OUTPUT
-        conn = self._make_conn_with_lines(b"hello,world,123\n")
-        result = await conn._read_response()
-        assert result == ""
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +375,6 @@ class TestSetLightLevel:
         conn = make_connection()
         with patch.object(conn, 'send_command', return_value="~OUTPUT,25,1,50.00") as mock_send:
             await conn.set_light_level(zone_id=25, brightness=50, fade_time=1800)
-
         mock_send.assert_called_once_with("#OUTPUT,25,1,50,1800")
 
     @pytest.mark.asyncio
