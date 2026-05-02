@@ -32,7 +32,10 @@ All of this happens through a single service call—no manual dimming, no multip
 - 🌅 **Long fade times** - Fade lights over minutes or hours (not limited by standard HA transition times)
 - 🔌 **Direct Telnet control** - Bypasses standard integration limits using Lutron Integration Protocol (LIP)
 - 🎛️ **Custom service** - `lutron_fader.fade_to` with extended fade time support
-- 🔄 **Connection management** - Intelligent connection pooling with automatic keep-alive
+- 💡 **Standard HA light control** - `light.turn_on` / `light.turn_off` with `transition:` works natively
+- 📡 **Real-time push updates** - Persistent connection with background reader; Pico button presses and app changes update HA state instantly without polling
+- 📊 **Live brightness tracking** - HA brightness attribute updates every second during an active fade so dashboards and automations see the actual dimmer position
+- 🔄 **Connection management** - Persistent keep-alive ping with automatic reconnect on drop
 
 ## Requirements
 
@@ -136,6 +139,29 @@ For complete dashboard configuration examples, see the [examples/](examples/) fo
 - Full page dashboard templates
 
 ## Usage
+
+### Standard HA Light Control (Recommended)
+
+Lutron Fader entities appear as standard HA lights and support the `transition` parameter natively:
+
+```yaml
+service: light.turn_off
+target:
+  entity_id: light.lutron_zone_5
+data:
+  transition: 1800  # 30 minutes
+```
+
+```yaml
+service: light.turn_on
+target:
+  entity_id: light.lutron_zone_5
+data:
+  brightness: 255
+  transition: 900  # 15 minutes
+```
+
+HA brightness updates every second during the fade so dashboards stay in sync.
 
 ### Service: `lutron_fader.fade_to`
 
@@ -278,14 +304,17 @@ This integration is under active development. Contributions are welcome!
 - [x] GUI setup / Config Flow
 - [x] Automatic light discovery
 - [x] Custom Lovelace card with fade controls
+- [x] Persistent Telnet connection with background reader loop
+- [x] Real-time push state updates (Pico/app changes reflected instantly)
+- [x] Live brightness interpolation during active fades
+- [x] Standard `light.turn_on/off` with `transition:` support
+- [x] Unit tests (81 passing)
 - [ ] HACS integration
 - [ ] Multi-zone fade service
 - [ ] Fade cancellation
 - [ ] Better error handling and notifications
 - [ ] Retry logic on Telnet command failure
-- [ ] State polling (`should_poll`) so current brightness stays in sync
 - [ ] Wire up `discover_zones()` to zone configuration flow
-- [ ] Unit and integration tests
 
 ## Contributing
 
