@@ -311,9 +311,6 @@ This integration is under active development. Contributions are welcome!
 - [x] Unit tests (81 passing)
 - [ ] HACS integration
 - [ ] Multi-zone fade service
-- [ ] Fade cancellation
-- [ ] Better error handling and notifications
-- [ ] Retry logic on Telnet command failure
 - [ ] Wire up `discover_zones()` to zone configuration flow
 
 ## Contributing
