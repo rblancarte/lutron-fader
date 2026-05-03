@@ -375,6 +375,14 @@ class LutronTelnetConnection:
         finally:
             self._pending_response = None
 
+    @staticmethod
+    def _seconds_to_lip_time(seconds: int) -> str:
+        """Convert seconds to Lutron HH:MM:SS fade time format."""
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
     async def set_light_level(
         self, zone_id: int, brightness: int, fade_time: int = 0
     ) -> bool:
@@ -390,8 +398,8 @@ class LutronTelnetConnection:
         Returns:
             True if command sent successfully, False otherwise
         """
-        # Format: #OUTPUT,<zone_id>,1,<brightness>,<fade_time>
-        command = f"#OUTPUT,{zone_id},{OUTPUT_ACTION_ZONE_LEVEL},{brightness},{fade_time}"
+        fade_str = self._seconds_to_lip_time(fade_time)
+        command = f"#OUTPUT,{zone_id},{OUTPUT_ACTION_ZONE_LEVEL},{brightness},{fade_str}"
 
         _LOGGER.info(
             "Setting zone %s to %s%% with %s second fade",

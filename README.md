@@ -300,18 +300,21 @@ tap_action:
 
 This integration is under active development. Contributions are welcome!
 
-### To-Do List
-- [x] GUI setup / Config Flow
-- [x] Automatic light discovery
-- [x] Custom Lovelace card with fade controls
-- [x] Persistent Telnet connection with background reader loop
-- [x] Real-time push state updates (Pico/app changes reflected instantly)
-- [x] Live brightness interpolation during active fades
-- [x] Standard `light.turn_on/off` with `transition:` support
-- [x] Unit tests (81 passing)
+### Implemented
+- Config flow (connection credentials via UI)
+- Automatic light discovery (via `auto_configure_from_report` service)
+- Custom Lovelace card with fade controls
+- Persistent Telnet connection with background reader loop
+- Real-time push state updates (Pico/app changes reflected instantly)
+- Live brightness interpolation during active fades
+- Standard `light.turn_on/off` with `transition:` support
+- Hardware fade via correct LIP `HH:MM:SS` time format
+- Unit tests (89 passing)
+
+### To-Do
+- [ ] GUI setup — zone discovery integrated into config flow
 - [ ] HACS integration
 - [ ] Multi-zone fade service
-- [ ] Wire up `discover_zones()` to zone configuration flow
 
 ## Contributing
 

@@ -369,13 +369,36 @@ class TestSendCommand:
 # set_light_level
 # ---------------------------------------------------------------------------
 
+class TestSecondsToLipTime:
+    def test_zero(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(0) == "00:00:00"
+
+    def test_under_60(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(10) == "00:00:10"
+        assert LutronTelnetConnection._seconds_to_lip_time(59) == "00:00:59"
+
+    def test_exactly_60(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(60) == "00:01:00"
+
+    def test_minutes(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(90) == "00:01:30"
+        assert LutronTelnetConnection._seconds_to_lip_time(1800) == "00:30:00"
+
+    def test_hours(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(3600) == "01:00:00"
+        assert LutronTelnetConnection._seconds_to_lip_time(14400) == "04:00:00"
+
+    def test_mixed(self):
+        assert LutronTelnetConnection._seconds_to_lip_time(3661) == "01:01:01"
+
+
 class TestSetLightLevel:
     @pytest.mark.asyncio
     async def test_correct_command_format(self):
         conn = make_connection()
         with patch.object(conn, 'send_command', return_value="~OUTPUT,25,1,50.00") as mock_send:
             await conn.set_light_level(zone_id=25, brightness=50, fade_time=1800)
-        mock_send.assert_called_once_with("#OUTPUT,25,1,50,1800")
+        mock_send.assert_called_once_with("#OUTPUT,25,1,50,00:30:00")
 
     @pytest.mark.asyncio
     async def test_returns_true_on_valid_response(self):
@@ -403,7 +426,21 @@ class TestSetLightLevel:
         conn = make_connection()
         with patch.object(conn, 'send_command', return_value="~OUTPUT,25,1,50.00") as mock_send:
             await conn.set_light_level(25, 50)
-        mock_send.assert_called_once_with("#OUTPUT,25,1,50,0")
+        mock_send.assert_called_once_with("#OUTPUT,25,1,50,00:00:00")
+
+    @pytest.mark.asyncio
+    async def test_under_60s_uses_seconds_field(self):
+        conn = make_connection()
+        with patch.object(conn, 'send_command', return_value="~OUTPUT,25,1,50.00") as mock_send:
+            await conn.set_light_level(25, 50, 10)
+        mock_send.assert_called_once_with("#OUTPUT,25,1,50,00:00:10")
+
+    @pytest.mark.asyncio
+    async def test_60s_formats_as_minutes(self):
+        conn = make_connection()
+        with patch.object(conn, 'send_command', return_value="~OUTPUT,25,1,50.00") as mock_send:
+            await conn.set_light_level(25, 50, 60)
+        mock_send.assert_called_once_with("#OUTPUT,25,1,50,00:01:00")
 
 
 # ---------------------------------------------------------------------------
