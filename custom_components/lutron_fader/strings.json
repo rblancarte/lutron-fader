@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Configure Lutron Fader",
-        "description": "Connect to your Lutron Caseta Pro hub via Telnet to enable fade time support.",
+        "description": "Connect to your Lutron hub via Telnet to enable fade time support.",
         "data": {
           "host": "Hub IP Address",
           "port": "Port",
@@ -15,11 +15,19 @@
         "data_description": {
           "ping_zone": "Zone ID to use for connection keep-alive pings (default: 1)"
         }
+      },
+      "report": {
+        "title": "Paste Integration Report",
+        "description": "Paste your Lutron Integration Report to discover your zones automatically. In the Lutron app, go to Settings → Advanced → Integration → Send Integration Report, then copy and paste the full report text below.\n\nLeave blank to skip — you can configure zones later using the `lutron_fader.auto_configure_from_report` service.",
+        "data": {
+          "report_text": "Integration Report"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to Lutron hub",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "report_parse_failed": "Could not find any zones in the report. Check that you pasted the full report text and try again."
     },
     "abort": {
       "already_configured": "Lutron Fader is already configured for this hub"

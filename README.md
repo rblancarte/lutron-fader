@@ -311,8 +311,8 @@ tap_action:
 This integration is under active development. Contributions are welcome!
 
 ### Implemented
-- Config flow (connection credentials via UI)
-- Automatic light discovery (via `auto_configure_from_report` service)
+- Config flow (hub credentials + Integration Report paste → zones created automatically)
+- Zone discovery via `auto_configure_from_report` service (user-initiated, report paste)
 - Custom Lovelace card with fade controls
 - Persistent Telnet connection with background reader loop
 - Real-time push state updates (Pico/app changes reflected instantly)
@@ -322,7 +322,7 @@ This integration is under active development. Contributions are welcome!
 - Unit tests (89 passing)
 
 ### To-Do
-- [ ] GUI setup — zone discovery integrated into config flow
+- [ ] Automatic light discovery — query the hub directly during setup, no report paste required
 - [ ] HACS integration
 - [ ] Multi-zone fade service
 

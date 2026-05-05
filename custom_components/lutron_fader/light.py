@@ -117,50 +117,43 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Lutron Fader lights from a config entry (UI-based config)."""
-    _LOGGER.info("Setting up Lutron Fader lights from config entry")
-
-    # Get our telnet connection
     connection_data = hass.data[DOMAIN][config_entry.entry_id]
     connection: LutronTelnetConnection = connection_data["connection"]
 
-    # Get zone mappings from config entry (populated by auto_configure service)
-    zone_mappings = config_entry.data.get("zone_mappings", {})
-
-    if not zone_mappings:
-        _LOGGER.info("No zone mappings found. Run auto_configure_from_report service to create entities.")
-        return
-
-    # Create light entities for each mapped zone
     fader_lights = []
 
-    for entity_id, zone_id in zone_mappings.items():
-        # Get the original entity to extract its friendly name
-        state = hass.states.get(entity_id)
-        if state:
-            name = state.attributes.get("friendly_name", f"Zone {zone_id}")
-        else:
-            name = f"Zone {zone_id}"
-
-        # Create a unique_id for this lutron_fader entity
-        unique_id = f"lutron_fader_zone_{zone_id}"
-
-        _LOGGER.info("Creating Lutron Fader entity: %s (Zone %s)", name, zone_id)
-
-        fader_light = LutronFaderLight(
+    # Primary source: zones from config flow {zone_id_str: name}
+    zones = config_entry.data.get("zones", {})
+    for zone_id_str, name in zones.items():
+        zone_id = int(zone_id_str)
+        fader_lights.append(LutronFaderLight(
             hass=hass,
             connection=connection,
             name=name,
             zone_id=zone_id,
-            unique_id=unique_id,
-            original_entity_id=entity_id,
-        )
-        fader_lights.append(fader_light)
+            unique_id=f"lutron_fader_zone_{zone_id}",
+        ))
+
+    # Fallback: zone_mappings from auto_configure service {entity_id: zone_id}
+    if not fader_lights:
+        zone_mappings = config_entry.data.get("zone_mappings", {})
+        for entity_id, zone_id in zone_mappings.items():
+            state = hass.states.get(entity_id)
+            name = state.attributes.get("friendly_name", f"Zone {zone_id}") if state else f"Zone {zone_id}"
+            fader_lights.append(LutronFaderLight(
+                hass=hass,
+                connection=connection,
+                name=name,
+                zone_id=zone_id,
+                unique_id=f"lutron_fader_zone_{zone_id}",
+                original_entity_id=entity_id,
+            ))
 
     if fader_lights:
-        _LOGGER.info("Adding %d Lutron Fader light entities from config entry", len(fader_lights))
+        _LOGGER.info("Adding %d Lutron Fader light entities", len(fader_lights))
         async_add_entities(fader_lights, True)
     else:
-        _LOGGER.warning("No lights created. Check zone_mappings in config entry.")
+        _LOGGER.info("No zones configured — re-add the integration and paste your Integration Report.")
 
 
 class LutronFaderLight(LightEntity):
