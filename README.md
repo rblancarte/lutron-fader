@@ -1,14 +1,24 @@
 # Lutron Fader
 
-A Home Assistant custom integration that adds extended fade time support to Lutron Caseta lights via direct Telnet communication.
+A Home Assistant custom integration that adds extended fade time support to Lutron lights via direct Telnet communication using the Lutron Integration Protocol (LIP).
 
 ## Why This Integration?
 
-The standard Lutron Caseta integration provides excellent support for features exposed through the Lutron Caseta app. However, owners of professional-grade hardware—including the Smart Bridge Pro (L-BDGPRO2-WH), RadioRA 2 Main Repeater (RR-SEL-REP2-BL), and HomeWorks QS/QSX Processors—have access to powerful extended features that aren't typically exposed to users.
+The standard Lutron Caseta integration provides excellent support for features exposed through the Lutron Caseta app. However, owners of professional-grade Lutron hardware have access to powerful extended features that aren't typically exposed to users. These systems expose the **Lutron Integration Protocol (LIP)** over a direct Telnet connection — an openly documented, line-based text protocol that gives you full zone control including hardware-native fade times.
 
-These advanced capabilities are accessible through two protocols:
-- **Lutron Integration Protocol (LIP)** - Openly available and documented
-- **Lutron Extensible Application Protocol (LEAP)** - Available only to professional integrators
+**Supported systems (per Lutron ICD 040249):**
+
+| System | Integration Access Point | Telnet Port |
+|--------|--------------------------|-------------|
+| Caseta Pro Smart Bridge ⁺ | L-BDGPRO2-WH | 23 |
+| RadioRA 2 | Main Repeater (RR-MAIN-REP-WH / RRK-MAIN-REP-WH) | Configurable in software |
+| HomeWorks QS | HomeWorks QS Processor | — |
+| Quantum | QSE-CI-NWK-E | 23 |
+| Athena | QSE-CI-NWK-E | 23 |
+| QS Standalone | QSE-CI-NWK-E | 23 |
+| myRoom Plus | GCU-HOSP Processor | — |
+
+> ⁺ Caseta Pro (L-BDGPRO2-WH) supports Telnet and the LIP command set in practice, but is not documented in Lutron ICD 040249 — use at your own discretion. Standard non-Pro Caseta (L-BDG2-WH) does **not** support LIP.
 
 ### The Power of Native Dimming
 
@@ -40,8 +50,8 @@ All of this happens through a single service call—no manual dimming, no multip
 ## Requirements
 
 - Home Assistant 2023.1 or newer
-- Lutron Caseta Pro Smart Bridge (L-BDGPRO2-WH), RadioRA 2 Select (RR-SEL-REP2-BL), or HomeWorks QS/QSX Processor
-- Telnet integration enabled on your Lutron hub
+- A Lutron system that supports LIP over Telnet: Caseta Pro Smart Bridge (L-BDGPRO2-WH), RadioRA 2 Main Repeater, HomeWorks QS Processor, Quantum, Athena, QS Standalone, or myRoom Plus
+- Telnet/LIP integration enabled on the hub
 
 ## Installation
 
@@ -273,8 +283,8 @@ tap_action:
 
 ## Known Limitations
 
-- Only works with Caseta Pro, RadioRA 2 Select, or HomeWorks QS/QSX (requires Telnet/LIP support)
-- Standard Caseta bridge (non-Pro model L-BDG2-WH) is **not supported**
+- Requires a Lutron system with LIP/Telnet support — see the supported systems table in the Why This Integration? section
+- Standard Caseta bridge (L-BDG2-WH) is **not supported** — does not expose LIP over Telnet
 - Zone IDs must be manually configured (auto-discovery coming soon)
 - Shades do not support extended fade times (they move at fixed motor speed)
 
