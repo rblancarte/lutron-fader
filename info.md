@@ -25,7 +25,7 @@ Extended fade time support for Lutron Caseta Pro lights via direct Telnet contro
 2. Add integration via UI (Settings → Devices & Services → Add Integration)
 3. Enter your Lutron hub IP address
 4. Run `auto_configure_from_report` service with your Integration Report
-5. Add the custom card resource: `/lutron_fader_static/lutron-fader-card.js`
+5. Download `lutron-fader-card.js` from the [lutron-fader-card repo](https://github.com/rblancarte/lutron-fader-card), copy to `config/www/`, then add it as a Lovelace resource at `/local/lutron-fader-card.js`
 6. Start creating long fades!
 
 ## Usage

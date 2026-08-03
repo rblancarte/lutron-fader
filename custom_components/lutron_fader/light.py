@@ -193,6 +193,7 @@ class LutronFaderLight(LightEntity):
         self._fade_start_time: float = 0.0
         self._fade_duration: float = 0.0
         self._fade_cancel_unsub = None              # unsubscribe handle for refresh timer
+        self._snap_timer: asyncio.TimerHandle | None = None  # handle for post-fade snap callback
 
     async def async_added_to_hass(self) -> None:
         """Register push callback when entity is added."""
@@ -228,10 +229,13 @@ class LutronFaderLight(LightEntity):
         )
 
     def _cancel_fade_tracking(self) -> None:
-        """Stop the periodic refresh timer."""
+        """Stop the periodic refresh timer and any pending snap callback."""
         if self._fade_cancel_unsub is not None:
             self._fade_cancel_unsub()
             self._fade_cancel_unsub = None
+        if self._snap_timer is not None:
+            self._snap_timer.cancel()
+            self._snap_timer = None
         self._fade_target_lutron = None
 
     @callback
@@ -405,7 +409,7 @@ class LutronFaderLight(LightEntity):
 
             if snap_to_full and fade_time > 0:
                 # After the fade completes, snap to 255
-                asyncio.get_event_loop().call_later(
+                self._snap_timer = asyncio.get_running_loop().call_later(
                     fade_time, self._snap_brightness, 255
                 )
 
@@ -450,7 +454,7 @@ class LutronFaderLight(LightEntity):
                 self.async_write_ha_state()
 
                 # Snap off after fade completes
-                asyncio.get_event_loop().call_later(fade_time, self._snap_off)
+                self._snap_timer = asyncio.get_running_loop().call_later(fade_time, self._snap_off)
             else:
                 self._cancel_fade_tracking()
                 self._attr_is_on = False

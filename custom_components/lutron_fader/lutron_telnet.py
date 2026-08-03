@@ -97,7 +97,7 @@ class LutronTelnetConnection:
 
     async def _dispatch_push(self, line: str, source: str) -> None:
         """Dispatch a push event line to all registered callbacks."""
-        for callback in self._push_callbacks:
+        for callback in list(self._push_callbacks):
             try:
                 callback(line, source)
             except Exception as e:

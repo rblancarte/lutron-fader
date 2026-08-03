@@ -85,7 +85,9 @@ def parse_integration_report(report_text: str) -> dict[int, str]:
             try:
                 zone_id = int(parts[0])
                 zone_name = parts[1]
-                zones[zone_id] = zone_name
+                zone_type = parts[2] if len(parts) > 2 else "Unknown"
+                if "light" in zone_type.lower() or "output" in zone_type.lower() or zone_type == "Unknown":
+                    zones[zone_id] = zone_name
             except (ValueError, IndexError):
                 pass
 

@@ -103,18 +103,19 @@ To find the zone ID for your lights:
 
 ## Custom Lovelace Card
 
-This integration includes a custom Lovelace card for easy control of your Lutron lights with fade times.
+A companion Lovelace card is available as a separate download from the [lutron-fader-card](https://github.com/rblancarte/lutron-fader-card) repository.
 
 ### Installing the Card
 
-1. The card is automatically included with the integration
-2. Go to **Settings → Dashboards → Resources** (☰ menu → Resources)
-3. Click **"+ Add Resource"**
-4. Enter:
-   - URL: `/lutron_fader_static/lutron-fader-card.js`
+1. Download `lutron-fader-card.js` from the [lutron-fader-card releases](https://github.com/rblancarte/lutron-fader-card)
+2. Copy it to your Home Assistant `config/www/` directory
+3. Go to **Settings → Dashboards → Resources** (☰ menu → Resources)
+4. Click **"+ Add Resource"**
+5. Enter:
+   - URL: `/local/lutron-fader-card.js`
    - Resource type: **JavaScript Module**
-5. Click "Create"
-6. Refresh your browser (Ctrl+F5 or Cmd+Shift+R)
+6. Click "Create"
+7. Refresh your browser (Ctrl+F5 or Cmd+Shift+R)
 
 ### Using the Card
 

@@ -3,7 +3,6 @@ import logging
 
 import voluptuous as vol
 
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -13,6 +12,7 @@ from homeassistant.helpers.typing import ConfigType
 
 
 
+from .config_flow import parse_integration_report
 from .const import (
     ATTR_BRIGHTNESS,
     ATTR_ENTITY_ID,
@@ -132,9 +132,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if "yaml_connection" not in hass.data[DOMAIN]:
         await _async_setup_services(hass, connection)
 
-    # Register frontend resources
-    await _async_register_frontend_resources(hass)
-
     # Forward the setup to the light platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -155,7 +152,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN] or (
         len(hass.data[DOMAIN]) == 1 and "yaml_connection" in hass.data[DOMAIN]
     ):
-        hass.services.async_remove(DOMAIN, SERVICE_FADE_TO)
+        for svc in (SERVICE_FADE_TO, SERVICE_PARSE_REPORT, SERVICE_DISCOVER_ENTITIES, SERVICE_AUTO_CONFIGURE):
+            hass.services.async_remove(DOMAIN, svc)
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
@@ -175,11 +173,10 @@ async def _async_setup_services(
         if ATTR_ENTITY_ID in call.data:
             entity_id = call.data[ATTR_ENTITY_ID]
 
-            # Get zone mappings from config entry
+            # Merge zone mappings from all config entries
             zone_mappings = {}
             for entry in hass.config_entries.async_entries(DOMAIN):
-                zone_mappings = entry.data.get("zone_mappings", {})
-                break
+                zone_mappings.update(entry.data.get("zone_mappings", {}))
 
             if entity_id in zone_mappings:
                 zone_id = zone_mappings[entity_id]
@@ -300,60 +297,13 @@ async def _async_setup_services(
 
     async def handle_parse_integration_report(call: ServiceCall) -> None:
         """Handle the parse_integration_report service call."""
-        import json
-
         report_text = call.data[ATTR_REPORT_TEXT]
 
         _LOGGER.info("Parsing Integration Report...")
 
-        # Parse the report to extract zones
-        zones = {}
-
-        # Try JSON format first
-        try:
-            report_data = json.loads(report_text)
-            _LOGGER.info("Detected JSON format Integration Report")
-
-            # Navigate to Zones in the JSON structure
-            if "LIPIdList" in report_data and "Zones" in report_data["LIPIdList"]:
-                for zone in report_data["LIPIdList"]["Zones"]:
-                    zone_id = zone.get("ID")
-                    zone_name = zone.get("Name")
-                    area_name = zone.get("Area", {}).get("Name", "")
-
-                    if zone_id and zone_name:
-                        # Include area in the name if available
-                        full_name = f"{area_name} {zone_name}" if area_name else zone_name
-                        zones[zone_id] = full_name
-                        _LOGGER.info("Found zone %s: %s", zone_id, full_name)
-            else:
-                _LOGGER.warning("JSON format not recognized - expected LIPIdList.Zones structure")
-
-        except json.JSONDecodeError:
-            # Fall back to CSV parsing
-            _LOGGER.info("Not JSON, trying CSV format")
-            lines = report_text.strip().split('\n')
-
-            for line in lines:
-                # Skip empty lines and header
-                if not line.strip() or 'INTEGRATION ID' in line.upper():
-                    continue
-
-                # Try to parse CSV format: ID,Name,Type
-                parts = [p.strip() for p in line.split(',')]
-
-                if len(parts) >= 2:
-                    try:
-                        zone_id = int(parts[0])
-                        zone_name = parts[1]
-                        zone_type = parts[2] if len(parts) > 2 else "Unknown"
-
-                        # Only include lights/outputs
-                        if 'light' in zone_type.lower() or 'output' in zone_type.lower() or zone_type == "Unknown":
-                            zones[zone_id] = zone_name
-                            _LOGGER.info("Found zone %s: %s (%s)", zone_id, zone_name, zone_type)
-                    except (ValueError, IndexError):
-                        _LOGGER.debug("Skipping invalid line: %s", line)
+        zones = parse_integration_report(report_text)
+        for zone_id, zone_name in zones.items():
+            _LOGGER.info("Found zone %s: %s", zone_id, zone_name)
 
         # Log the YAML configuration
         if zones:
@@ -427,8 +377,6 @@ async def _async_setup_services(
 
     async def handle_auto_configure_from_report(call: ServiceCall) -> None:
         """Parse Integration Report AND match entities in one step."""
-        import json
-
         report_text = call.data[ATTR_REPORT_TEXT]
 
         _LOGGER.info("=" * 60)
@@ -436,44 +384,7 @@ async def _async_setup_services(
         _LOGGER.info("=" * 60)
 
         # STEP 1: Parse the Integration Report
-        zones = {}
-
-        try:
-            report_data = json.loads(report_text)
-            _LOGGER.info("Detected JSON format Integration Report")
-
-            if "LIPIdList" in report_data and "Zones" in report_data["LIPIdList"]:
-                for zone in report_data["LIPIdList"]["Zones"]:
-                    zone_id = zone.get("ID")
-                    zone_name = zone.get("Name")
-                    area_name = zone.get("Area", {}).get("Name", "")
-
-                    if zone_id and zone_name:
-                        full_name = f"{area_name} {zone_name}" if area_name else zone_name
-                        zones[zone_id] = full_name
-            else:
-                _LOGGER.warning("JSON format not recognized")
-
-        except json.JSONDecodeError:
-            _LOGGER.info("Not JSON, trying CSV format")
-            lines = report_text.strip().split('\n')
-
-            for line in lines:
-                if not line.strip() or 'INTEGRATION ID' in line.upper():
-                    continue
-
-                parts = [p.strip() for p in line.split(',')]
-
-                if len(parts) >= 2:
-                    try:
-                        zone_id = int(parts[0])
-                        zone_name = parts[1]
-                        zone_type = parts[2] if len(parts) > 2 else "Unknown"
-
-                        if 'light' in zone_type.lower() or 'output' in zone_type.lower() or zone_type == "Unknown":
-                            zones[zone_id] = zone_name
-                    except (ValueError, IndexError):
-                        pass
+        zones = parse_integration_report(report_text)
 
         if not zones:
             _LOGGER.error("No zones found in Integration Report")
@@ -587,27 +498,3 @@ async def _async_setup_services(
     )
 
     _LOGGER.info("Lutron Fader services registered")
-
-
-async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
-    """Register frontend resources (custom card)."""
-    import os
-
-    # Only register once
-    if "frontend_registered" in hass.data.get(DOMAIN, {}):
-        return
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["frontend_registered"] = True
-
-    # Get the path to our www directory
-    www_path = os.path.join(os.path.dirname(__file__), "www")
-
-    # Register the Lovelace resource
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(f"/lutron_fader_static", www_path, cache_headers=False)
-    ])
-
-    _LOGGER.info(
-        "Lutron Fader card available at: /lutron_fader_static/lutron-fader-card.js"
-    )

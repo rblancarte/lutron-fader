@@ -25,10 +25,7 @@ SERVICE_AUTO_CONFIGURE = "auto_configure_from_report"
 ATTR_ZONE_ID = "zone_id"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_BRIGHTNESS = "brightness"
-ATTR_TARGET_BRIGHTNESS_PCT = "target_brightness_pct"  # Alternative name
 ATTR_FADE_TIME = "fade_time"
-ATTR_DURATION = "duration"
-ATTR_DURATION_SECONDS = "duration_seconds"  # More explicit
 ATTR_REPORT_TEXT = "report_text"
 
 # Platforms
