@@ -6,7 +6,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, discovery, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
@@ -91,9 +91,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         _LOGGER.error("Failed to connect to Lutron hub at %s", conf[CONF_HOST])
         return False
     
+    # Stay connected so push updates (Pico, app) flow from boot
     _LOGGER.info("Successfully connected to Lutron hub")
-    await connection.disconnect()
-    
+
     # Store connection in hass.data with a special key for YAML config
     hass.data[DOMAIN]["yaml_connection"] = connection
     hass.data[DOMAIN]["yaml_config"] = conf
@@ -106,8 +106,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
     
     # Register services
-    await _async_setup_services(hass, connection)
-    
+    await _async_setup_services(hass)
+
     return True
 
 
@@ -128,9 +128,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "entry": entry,
     }
 
-    # Register services (if not already registered from YAML)
-    if "yaml_connection" not in hass.data[DOMAIN]:
-        await _async_setup_services(hass, connection)
+    # Register services (no-op if YAML or another entry already did)
+    await _async_setup_services(hass)
 
     # Forward the setup to the light platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -143,62 +142,127 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
+
     # Disconnect from the hub
     connection_data = hass.data[DOMAIN].pop(entry.entry_id)
-    connection = connection_data["connection"]
-    await connection.disconnect()
+    await connection_data["connection"].disconnect()
 
-    # Unregister services (only if this is the last entry and no YAML config)
-    if not hass.data[DOMAIN] or (
-        len(hass.data[DOMAIN]) == 1 and "yaml_connection" in hass.data[DOMAIN]
-    ):
+    # Unregister services only if no other entry and no YAML config still needs them
+    other_entries = any(
+        e.entry_id in hass.data[DOMAIN] for e in hass.config_entries.async_entries(DOMAIN)
+    )
+    if not other_entries and "yaml_connection" not in hass.data[DOMAIN]:
         for svc in (SERVICE_FADE_TO, SERVICE_PARSE_REPORT, SERVICE_DISCOVER_ENTITIES, SERVICE_AUTO_CONFIGURE):
             hass.services.async_remove(DOMAIN, svc)
 
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    return True
 
 
-async def _async_setup_services(
-    hass: HomeAssistant, connection: LutronTelnetConnection
-) -> None:
-    """Set up the custom services for Lutron Fader."""
+def _get_connection(hass: HomeAssistant) -> LutronTelnetConnection | None:
+    """Return the live hub connection (YAML first, then any loaded config entry)."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if "yaml_connection" in domain_data:
+        return domain_data["yaml_connection"]
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        entry_data = domain_data.get(entry.entry_id)
+        if entry_data:
+            return entry_data["connection"]
+    return None
 
-    def get_zone_id_from_call(call: ServiceCall) -> int:
-        """Get zone_id from service call, either directly or by looking up entity_id."""
+
+def _fader_entity_for_zone(registry: er.EntityRegistry, zone_id: int) -> str | None:
+    """Return this integration's light entity for a zone, if one exists."""
+    # Config-entry lights use lutron_fader_zone_<id>; YAML lights use lutron_fader_<id>
+    for unique_id in (f"{DOMAIN}_zone_{zone_id}", f"{DOMAIN}_{zone_id}"):
+        entity_id = registry.async_get_entity_id("light", DOMAIN, unique_id)
+        if entity_id:
+            return entity_id
+    return None
+
+
+def _zone_from_fader_unique_id(unique_id: str) -> int | None:
+    """Parse the zone ID out of a lutron_fader light's unique_id."""
+    suffix = unique_id.rsplit("_", 1)[-1]
+    return int(suffix) if suffix.isdigit() else None
+
+
+async def _async_setup_services(hass: HomeAssistant) -> None:
+    """Set up the custom services for Lutron Fader (once per HA instance)."""
+    if hass.services.has_service(DOMAIN, SERVICE_FADE_TO):
+        return
+
+    def resolve_target(call: ServiceCall) -> tuple[int, str | None]:
+        """Return (zone_id, lutron_fader light entity_id or None) for a service call."""
+        registry = er.async_get(hass)
+
         # If zone_id is provided directly, use it
         if ATTR_ZONE_ID in call.data:
-            return call.data[ATTR_ZONE_ID]
+            zone_id = call.data[ATTR_ZONE_ID]
+            return zone_id, _fader_entity_for_zone(registry, zone_id)
 
-        # If entity_id is provided, look it up in zone_mappings
-        if ATTR_ENTITY_ID in call.data:
-            entity_id = call.data[ATTR_ENTITY_ID]
+        if ATTR_ENTITY_ID not in call.data:
+            raise ServiceValidationError("Either zone_id or entity_id must be provided")
 
-            # Merge zone mappings from all config entries
-            zone_mappings = {}
-            for entry in hass.config_entries.async_entries(DOMAIN):
-                zone_mappings.update(entry.data.get("zone_mappings", {}))
+        entity_id = call.data[ATTR_ENTITY_ID]
 
-            if entity_id in zone_mappings:
-                zone_id = zone_mappings[entity_id]
-                _LOGGER.debug("Resolved entity_id %s to zone_id %s", entity_id, zone_id)
-                return zone_id
-            else:
-                raise ValueError(f"Entity {entity_id} not found in zone mappings. Run auto_configure_from_report service first.")
+        # One of our own lights: the zone is in its unique_id
+        reg_entry = registry.async_get(entity_id)
+        if reg_entry and reg_entry.platform == DOMAIN:
+            zone_id = _zone_from_fader_unique_id(reg_entry.unique_id)
+            if zone_id is not None:
+                return zone_id, entity_id
 
-        raise ValueError("Either zone_id or entity_id must be provided")
+        # A lutron_caseta light: look it up in zone_mappings from auto_configure_from_report
+        zone_mappings = {}
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            zone_mappings.update(entry.data.get("zone_mappings", {}))
+
+        if entity_id in zone_mappings:
+            zone_id = zone_mappings[entity_id]
+            _LOGGER.debug("Resolved entity_id %s to zone_id %s", entity_id, zone_id)
+            return zone_id, _fader_entity_for_zone(registry, zone_id)
+
+        raise ServiceValidationError(
+            f"Entity {entity_id} is not a Lutron Fader light and is not in the zone "
+            "mappings. Use a Lutron Fader light, pass zone_id, or run "
+            "auto_configure_from_report first."
+        )
 
     async def handle_fade_to(call: ServiceCall) -> None:
         """Handle the fade_to service call."""
-        zone_id = get_zone_id_from_call(call)
+        zone_id, fader_entity_id = resolve_target(call)
         brightness = call.data[ATTR_BRIGHTNESS]
         fade_time = call.data.get(ATTR_FADE_TIME, 0)
 
         _LOGGER.info(
-            "Fade service called: zone=%s, brightness=%s, fade_time=%s",
+            "Fade service called: zone=%s, brightness=%s, fade_time=%s, entity=%s",
             zone_id,
             brightness,
             fade_time,
+            fader_entity_id,
         )
+
+        if fader_entity_id:
+            # Route through the entity so its state and fade tracking stay in sync
+            if brightness == 0:
+                await hass.services.async_call(
+                    "light", "turn_off",
+                    {ATTR_ENTITY_ID: fader_entity_id, "transition": fade_time},
+                    blocking=True,
+                )
+            else:
+                await hass.services.async_call(
+                    "light", "turn_on",
+                    {ATTR_ENTITY_ID: fader_entity_id, "brightness_pct": brightness, "transition": fade_time},
+                    blocking=True,
+                )
+            return
+
+        connection = _get_connection(hass)
+        if connection is None:
+            raise HomeAssistantError("Lutron Fader has no hub connection")
 
         success = await connection.set_light_level(zone_id, brightness, fade_time)
         if not success:

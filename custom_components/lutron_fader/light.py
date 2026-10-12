@@ -1,5 +1,4 @@
 """Support for Lutron Caseta lights with fade time."""
-import asyncio
 import logging
 import time
 from typing import Any
@@ -15,6 +14,7 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -188,21 +188,37 @@ class LutronFaderLight(LightEntity):
 
         # Fade interpolation state
         self._fade_start_level: float = 0.0        # 0-255
-        self._fade_target_level: float = 0.0       # 0-255 (post-snap logical target)
+        self._fade_target_level: float = 0.0       # 0-255
         self._fade_target_lutron: float | None = None  # 0-100, hub setpoint we sent
         self._fade_start_time: float = 0.0
         self._fade_duration: float = 0.0
         self._fade_cancel_unsub = None              # unsubscribe handle for refresh timer
-        self._snap_timer: asyncio.TimerHandle | None = None  # handle for post-fade snap callback
 
     async def async_added_to_hass(self) -> None:
-        """Register push callback when entity is added."""
+        """Register push/availability callbacks when entity is added."""
         self._connection.add_push_callback(self._handle_push)
+        self._connection.add_availability_callback(self._handle_availability)
 
     async def async_will_remove_from_hass(self) -> None:
-        """Unregister push callback when entity is removed."""
+        """Unregister callbacks when entity is removed."""
         self._connection.remove_push_callback(self._handle_push)
+        self._connection.remove_availability_callback(self._handle_availability)
         self._cancel_fade_tracking()
+
+    @property
+    def available(self) -> bool:
+        """Unavailable while the hub connection is recovering from a loss."""
+        return self._connection.available
+
+    @callback
+    def _handle_availability(self, available: bool) -> None:
+        """React to the hub connection going down or coming back."""
+        if available:
+            # Pushes were missed while disconnected; re-query the hub
+            self.async_schedule_update_ha_state(True)
+        else:
+            self._cancel_fade_tracking()
+            self.async_write_ha_state()
 
     # ------------------------------------------------------------------
     # Fade helpers
@@ -229,13 +245,10 @@ class LutronFaderLight(LightEntity):
         )
 
     def _cancel_fade_tracking(self) -> None:
-        """Stop the periodic refresh timer and any pending snap callback."""
+        """Stop the periodic refresh timer and forget the hub setpoint."""
         if self._fade_cancel_unsub is not None:
             self._fade_cancel_unsub()
             self._fade_cancel_unsub = None
-        if self._snap_timer is not None:
-            self._snap_timer.cancel()
-            self._snap_timer = None
         self._fade_target_lutron = None
 
     @callback
@@ -243,11 +256,11 @@ class LutronFaderLight(LightEntity):
         """Called every second during an active fade to push interpolated state."""
         elapsed = time.monotonic() - self._fade_start_time
         if elapsed >= self._fade_duration:
-            # Fade complete — snap to final value
+            # Fade complete — show the final value (the hub got there on its own)
             self._cancel_fade_tracking()
             self._attr_brightness = int(self._fade_target_level)
             self._attr_is_on = self._fade_target_level > 0
-            _LOGGER.debug("Fade complete: zone %s snapped to %.0f", self._zone_id, self._fade_target_level)
+            _LOGGER.debug("Fade complete: zone %s at %.0f", self._zone_id, self._fade_target_level)
         else:
             progress = elapsed / self._fade_duration
             interpolated = self._fade_start_level + (self._fade_target_level - self._fade_start_level) * progress
@@ -356,12 +369,8 @@ class LutronFaderLight(LightEntity):
         # Convert brightness from 0-255 to 0-100
         lutron_level = (brightness / 255.0) * 100
 
-        # Boundary: clamp away from true-off; snap to 100 after fade
-        snap_to_full = lutron_level >= 99.0
-        if snap_to_full:
-            send_level = 99
-        else:
-            send_level = max(1, int(lutron_level))
+        # Clamp away from true-off (that's turn_off's job)
+        send_level = min(100, max(1, round(lutron_level)))
 
         fade_time = int(transition)
 
@@ -379,39 +388,40 @@ class LutronFaderLight(LightEntity):
 
         # Set before sending so _handle_push can recognise our hub echo mid-await.
         if fade_time > 0:
-            self._fade_target_lutron = 100.0 if snap_to_full else float(send_level)
+            self._fade_target_lutron = float(send_level)
 
         success = await self._connection.set_light_level(self._zone_id, send_level, fade_time)
 
         if not success:
             self._fade_target_lutron = None
+            raise HomeAssistantError(
+                f"Lutron hub did not acknowledge command for zone {self._zone_id}"
+            )
+
+        if fade_time > 0 and self._fade_target_lutron is None:
+            # An external change (Pico, app) arrived while we awaited the ack and
+            # cleared our target; _handle_push already applied it — don't override.
+            _LOGGER.debug("Zone %s overridden during command; not tracking fade", self._zone_id)
             return
 
-        if success:
-            start_brightness = self._interpolated_brightness() if self._attr_is_on else 0
-            target_brightness = 255 if snap_to_full else int((send_level / 100.0) * 255)
+        start_brightness = self._interpolated_brightness() if self._attr_is_on else 0
+        target_brightness = round((send_level / 100.0) * 255)
 
-            self._attr_is_on = True
-            self._attr_brightness = start_brightness
+        self._attr_is_on = True
+        self._attr_brightness = start_brightness
 
-            if fade_time > 0:
-                self._start_fade_tracking(
-                    start_level=float(start_brightness),
-                    target_level=float(target_brightness),
-                    duration=float(fade_time),
-                    lutron_target=100.0 if snap_to_full else float(send_level),
-                )
-            else:
-                self._cancel_fade_tracking()
-                self._attr_brightness = target_brightness
+        if fade_time > 0:
+            self._start_fade_tracking(
+                start_level=float(start_brightness),
+                target_level=float(target_brightness),
+                duration=float(fade_time),
+                lutron_target=float(send_level),
+            )
+        else:
+            self._cancel_fade_tracking()
+            self._attr_brightness = target_brightness
 
-            self.async_write_ha_state()
-
-            if snap_to_full and fade_time > 0:
-                # After the fade completes, snap to 255
-                self._snap_timer = asyncio.get_running_loop().call_later(
-                    fade_time, self._snap_brightness, 255
-                )
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the light with optional fade time."""
@@ -430,61 +440,38 @@ class LutronFaderLight(LightEntity):
             )
             return
 
+        # Set before sending so _handle_push can recognise our hub echo mid-await.
         if fade_time > 0:
-            # Set before sending so _handle_push can recognise our hub echo mid-await.
             self._fade_target_lutron = 0.0
-            success = await self._connection.set_light_level(self._zone_id, 1, fade_time)
-        else:
-            success = await self._connection.set_light_level(self._zone_id, 0, 0)
+
+        success = await self._connection.set_light_level(self._zone_id, 0, fade_time)
 
         if not success:
             self._fade_target_lutron = None
+            raise HomeAssistantError(
+                f"Lutron hub did not acknowledge command for zone {self._zone_id}"
+            )
+
+        if fade_time > 0 and self._fade_target_lutron is None:
+            # Overridden externally while awaiting the ack (see async_turn_on)
+            _LOGGER.debug("Zone %s overridden during command; not tracking fade", self._zone_id)
             return
 
-        if success:
-            if fade_time > 0:
-                start_brightness = float(self._interpolated_brightness() if self._attr_is_on else 0)
-                self._start_fade_tracking(
-                    start_level=start_brightness,
-                    target_level=0.0,
-                    duration=float(fade_time),
-                    lutron_target=0.0,
-                )
-                self._attr_is_on = True  # Still visually on while fading
-                self.async_write_ha_state()
-
-                # Snap off after fade completes
-                self._snap_timer = asyncio.get_running_loop().call_later(fade_time, self._snap_off)
-            else:
-                self._cancel_fade_tracking()
-                self._attr_is_on = False
-                self._attr_brightness = 0
-                self.async_write_ha_state()
-
-    @callback
-    def _snap_brightness(self, value: int) -> None:
-        """Snap brightness to a fixed value after a fade completes."""
-        self._cancel_fade_tracking()
-        self._attr_brightness = value
-        self._attr_is_on = value > 0
-        self.async_write_ha_state()
-        if self._zone_id is not None:
-            lutron_level = int((value / 255.0) * 100)
-            self.hass.async_create_task(
-                self._connection.set_light_level(self._zone_id, lutron_level, 0)
+        if fade_time > 0:
+            start_brightness = float(self._interpolated_brightness() if self._attr_is_on else 0)
+            self._start_fade_tracking(
+                start_level=start_brightness,
+                target_level=0.0,
+                duration=float(fade_time),
+                lutron_target=0.0,
             )
+            self._attr_is_on = True  # Still visually on while fading; _fade_tick turns it off
+        else:
+            self._cancel_fade_tracking()
+            self._attr_is_on = False
+            self._attr_brightness = 0
 
-    @callback
-    def _snap_off(self) -> None:
-        """Snap to fully off after a fade-to-off completes."""
-        self._cancel_fade_tracking()
-        self._attr_is_on = False
-        self._attr_brightness = 0
         self.async_write_ha_state()
-        if self._zone_id is not None:
-            self.hass.async_create_task(
-                self._connection.set_light_level(self._zone_id, 0, 0)
-            )
 
     def set_zone_id(self, zone_id: int) -> None:
         """Set the zone ID for this light (for manual configuration)."""

@@ -11,6 +11,10 @@ DEFAULT_TELNET_PORT = 23
 # Keep-alive
 PING_INTERVAL = 60         # seconds between keep-alive pings
 
+# Reconnect backoff after an unexpected connection loss
+RECONNECT_MIN_DELAY = 5    # seconds before the first reconnect attempt
+RECONNECT_MAX_DELAY = 300  # cap for exponential backoff
+
 # Auth handshake timing
 LOGIN_TIMEOUT = 5.0        # seconds to wait for each login prompt
 READ_CHUNK_SIZE = 256      # bytes per read chunk in _expect
@@ -83,9 +87,16 @@ class LutronTelnetConnection:
         self._ping_timer: Optional[asyncio.Task] = None
         self._reader_task: Optional[asyncio.Task] = None
         self._pending_response: Optional[asyncio.Future] = None
+        self._pending_zone: Optional[int] = None  # zone whose ~OUTPUT answers the pending command
         self._push_callbacks: list = []
+        self._availability_callbacks: list = []
         self._connect_lock = asyncio.Lock()  # Prevent concurrent connection attempts
         self._command_lock = asyncio.Lock()  # Serialize command/response cycles
+
+        # Connection-loss handling
+        self._auto_reconnect = False  # True once connected; False after an explicit disconnect()
+        self._lost = False            # True from an unexpected loss until the next successful connect
+        self._reconnect_task: Optional[asyncio.Task] = None
 
     def add_push_callback(self, callback) -> None:
         """Register a callback for push events from the hub."""
@@ -94,6 +105,34 @@ class LutronTelnetConnection:
     def remove_push_callback(self, callback) -> None:
         """Unregister a push event callback."""
         self._push_callbacks.remove(callback)
+
+    def add_availability_callback(self, callback) -> None:
+        """Register a callback invoked with True/False when availability changes."""
+        self._availability_callbacks.append(callback)
+
+    def remove_availability_callback(self, callback) -> None:
+        """Unregister an availability callback."""
+        self._availability_callbacks.remove(callback)
+
+    def _set_lost(self, lost: bool) -> None:
+        """Update the lost flag and notify availability callbacks on change."""
+        if self._lost == lost:
+            return
+        self._lost = lost
+        for callback in list(self._availability_callbacks):
+            try:
+                callback(not lost)
+            except Exception as e:
+                _LOGGER.error("Availability callback error: %s", e)
+
+    @property
+    def available(self) -> bool:
+        """Return False only while recovering from an unexpected connection loss.
+
+        A connection that was never opened or was closed on purpose is still
+        "available" — send_command connects lazily.
+        """
+        return not self._lost
 
     async def _dispatch_push(self, line: str, source: str) -> None:
         """Dispatch a push event line to all registered callbacks."""
@@ -106,9 +145,10 @@ class LutronTelnetConnection:
     async def _expect(self, token: bytes, timeout: float = 5.0) -> None:
         """Read from the hub until `token` appears, raising on timeout or bad credentials."""
         buf = b""
-        deadline = asyncio.get_event_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         while token not in buf:
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - loop.time()
             if remaining <= 0:
                 raise asyncio.TimeoutError(f"Timed out waiting for {token!r}")
             chunk = await asyncio.wait_for(self._reader.read(READ_CHUNK_SIZE), timeout=remaining)
@@ -152,21 +192,85 @@ class LutronTelnetConnection:
                 await self._expect(b"GNET>", timeout=LOGIN_TIMEOUT)
 
                 self._connected = True
+                self._auto_reconnect = True
                 _LOGGER.info("Successfully connected to Lutron hub at %s", self.host)
 
                 # Start background tasks
                 self._start_ping_timer()
                 self._start_reader_task()
 
+                self._set_lost(False)
                 return True
 
             except Exception as e:
                 _LOGGER.error("Failed to connect to Lutron hub: %s", e)
                 self._connected = False
+                self._close_transport()
                 return False
 
+    def _close_transport(self) -> None:
+        """Close the socket without awaiting; safe to call from sync code."""
+        if self._writer:
+            try:
+                self._writer.close()
+            except Exception as e:
+                _LOGGER.debug("Error closing writer (ignored): %s", e)
+        self._writer = None
+        self._reader = None
+
+    def _handle_connection_lost(self, reason: str) -> None:
+        """Tear down a connection that died unexpectedly and schedule a reconnect."""
+        if not self._connected and self._writer is None:
+            return  # already torn down (or never connected)
+
+        _LOGGER.warning("Lost connection to Lutron hub at %s: %s", self.host, reason)
+        self._connected = False
+
+        # Cancel background tasks, but never the task we're running in
+        current = asyncio.current_task()
+        for task in (self._ping_timer, self._reader_task):
+            if task and task is not current:
+                task.cancel()
+        self._ping_timer = None
+        self._reader_task = None
+
+        self._close_transport()
+
+        if self._pending_response and not self._pending_response.done():
+            self._pending_response.set_result("")
+
+        self._set_lost(True)
+        if self._auto_reconnect:
+            self._schedule_reconnect()
+
+    def _schedule_reconnect(self) -> None:
+        """Start the reconnect loop unless one is already running."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Retry connect() with exponential backoff until it succeeds."""
+        delay = RECONNECT_MIN_DELAY
+        try:
+            while self._auto_reconnect and not self._connected:
+                _LOGGER.info("Reconnecting to Lutron hub at %s in %ss", self.host, delay)
+                await asyncio.sleep(delay)
+                if not self._auto_reconnect or self._connected:
+                    return
+                if await self.connect():
+                    return
+                delay = min(delay * 2, RECONNECT_MAX_DELAY)
+        except asyncio.CancelledError:
+            pass
+
     async def disconnect(self) -> None:
-        """Close the Telnet connection."""
+        """Close the Telnet connection on purpose (no automatic reconnect)."""
+        self._auto_reconnect = False
+        if self._reconnect_task and self._reconnect_task is not asyncio.current_task():
+            self._reconnect_task.cancel()
+        self._reconnect_task = None
+
         # Cancel background tasks
         if self._ping_timer:
             self._ping_timer.cancel()
@@ -222,10 +326,12 @@ class LutronTelnetConnection:
     async def _reader_loop(self) -> None:
         """Continuously read lines from the hub socket.
 
-        Sole consumer of self._reader. Routes ~OUTPUT/~ERROR lines to
-        _pending_response if a command is waiting, otherwise dispatches
-        as a push event.
+        Sole consumer of self._reader. Routes the reply to the pending command
+        (an ~ERROR, or an ~OUTPUT for the zone the command targeted) to
+        _pending_response; everything else is dispatched as a push event.
+        If the socket dies, hands off to _handle_connection_lost.
         """
+        lost_reason = None
         try:
             while self._connected and self._reader:
                 try:
@@ -246,9 +352,7 @@ class LutronTelnetConnection:
                     if not line:
                         continue
 
-                    is_response = line.startswith("~OUTPUT") or line.startswith("~ERROR")
-
-                    if is_response and self._pending_response and not self._pending_response.done():
+                    if self._is_pending_reply(line):
                         self._pending_response.set_result(line)
                         await self._dispatch_push(line, SOURCE_INTERNAL)
                     else:
@@ -258,40 +362,62 @@ class LutronTelnetConnection:
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.IncompleteReadError:
-                    _LOGGER.warning("Hub closed the connection unexpectedly")
-                    self._connected = False
+                    lost_reason = "hub closed the connection"
                     break
         except asyncio.CancelledError:
             pass
         except Exception as e:
             _LOGGER.error("Reader loop error: %s", e)
+            lost_reason = f"reader error: {e}"
         finally:
             _LOGGER.debug("Reader loop exited")
+            if lost_reason:
+                self._handle_connection_lost(lost_reason)
+
+    def _is_pending_reply(self, line: str) -> bool:
+        """Return True if `line` answers the command currently awaiting a reply."""
+        if not self._pending_response or self._pending_response.done():
+            return False
+        if line.startswith("~ERROR"):
+            return True
+        if not line.startswith("~OUTPUT"):
+            return False
+        if self._pending_zone is None:
+            return True
+        parts = line.split(",")
+        return len(parts) > 1 and parts[1].strip() == str(self._pending_zone)
 
     async def _ping_loop(self) -> None:
-        """Continuously ping zone 1 to monitor connection status."""
+        """Periodically ping the hub; tear the connection down if it stops answering."""
         try:
             while self._connected:
                 await asyncio.sleep(PING_INTERVAL)
                 if self._connected:  # Check again after sleep
-                    await self._send_ping()
+                    if not await self._send_ping():
+                        self._handle_connection_lost("keep-alive ping got no reply")
+                        return
         except asyncio.CancelledError:
             # Timer was cancelled (disconnect called), this is normal
             pass
 
-    async def _send_ping(self) -> None:
-        """Send a ping query to zone 1 without resetting the disconnect timer.
+    async def _send_ping(self) -> bool:
+        """Send a keep-alive query to the ping zone.
 
-        This is an internal method that bypasses the normal command flow.
+        This is an internal method that bypasses the normal command flow
+        (it does not reset the ping timer).
+
+        Returns:
+            True if the hub answered (even with ~ERROR), False otherwise
         """
         if not self._connected or not self._writer:
-            return
+            return True  # nothing to check
 
         try:
             command = f"?OUTPUT,{self.ping_zone},{OUTPUT_ACTION_ZONE_LEVEL}"
             _LOGGER.debug("Sending ping: %s", command)
 
             async with self._command_lock:
+                self._arm_response(self.ping_zone)
                 self._writer.write(f"{command}\r\n".encode())
                 await self._writer.drain()
 
@@ -307,12 +433,13 @@ class LutronTelnetConnection:
                     _LOGGER.debug("Error parsing ping response '%s': %s", response, e)
             else:
                 _LOGGER.debug("Ping received no valid response: '%s'", response)
+            return bool(response)
 
         except Exception as e:
             _LOGGER.debug("Error sending ping: %s", e)
-            # Don't disconnect on ping errors - let the disconnect timer handle it
+            return False
 
-    async def send_command(self, command: str) -> Optional[str]:
+    async def send_command(self, command: str, expected_zone: Optional[int] = None) -> Optional[str]:
         """Send a command to the Lutron hub.
 
         This is like echoing a command in your bash script.
@@ -320,6 +447,9 @@ class LutronTelnetConnection:
         Args:
             command: The Lutron Integration Protocol command to send
                     (e.g., "#OUTPUT,25,1,50,1800")
+            expected_zone: Only an ~OUTPUT for this zone (or an ~ERROR) counts
+                    as the reply; other zones' pushes stay push events.
+                    None accepts any ~OUTPUT.
 
         Returns:
             Response from the hub, or None if error
@@ -344,6 +474,10 @@ class LutronTelnetConnection:
                     _LOGGER.error("Writer is None after connect — concurrent disconnect?")
                     return None
 
+                # Arm the reply slot before writing so a fast reply can't slip
+                # past as a push event
+                self._arm_response(expected_zone)
+
                 # Send the command (like: echo "#OUTPUT,25,1,0,30:00")
                 self._writer.write(f"{command}\r\n".encode())
                 await self._writer.drain()
@@ -352,21 +486,32 @@ class LutronTelnetConnection:
                 response = await self._await_response()
                 _LOGGER.debug("Received response: %s", response)
 
+                if not response and self._connected:
+                    # The hub always answers (~OUTPUT or ~ERROR); silence means the link is dead
+                    self._handle_connection_lost(f"no reply to '{command}'")
+
                 return response
 
             except Exception as e:
                 _LOGGER.error("Error sending command '%s': %s", command, e)
-                # Connection might be broken, disconnect and retry next time
-                await self.disconnect()
+                self._pending_response = None
+                self._pending_zone = None
+                # Connection is broken; tear down and reconnect in the background
+                self._handle_connection_lost(f"error sending command: {e}")
                 return None
 
-    async def _await_response(self, timeout: float = 5.0) -> str:
-        """Wait for _reader_loop to deliver the next command response.
+    def _arm_response(self, expected_zone: Optional[int]) -> None:
+        """Create the future _reader_loop resolves with the next matching reply."""
+        self._pending_zone = expected_zone
+        self._pending_response = asyncio.get_running_loop().create_future()
 
-        Sets _pending_response so the reader loop knows to route the next
-        ~OUTPUT or ~ERROR line here instead of treating it as a push event.
+    async def _await_response(self, timeout: float = 5.0) -> str:
+        """Wait for _reader_loop to deliver the reply to the armed command.
+
+        Arms a reply slot (accepting any zone) if the caller didn't.
         """
-        self._pending_response = asyncio.get_event_loop().create_future()
+        if self._pending_response is None:
+            self._arm_response(None)
         try:
             return await asyncio.wait_for(self._pending_response, timeout=timeout)
         except asyncio.TimeoutError:
@@ -374,6 +519,7 @@ class LutronTelnetConnection:
             return ""
         finally:
             self._pending_response = None
+            self._pending_zone = None
 
     @staticmethod
     def _seconds_to_lip_time(seconds: int) -> str:
@@ -408,7 +554,7 @@ class LutronTelnetConnection:
             fade_time
         )
 
-        response = await self.send_command(command)
+        response = await self.send_command(command, expected_zone=zone_id)
 
         # The hub should respond with something like: ~OUTPUT,25,1,50.00
         if response and response.startswith("~OUTPUT"):
@@ -434,7 +580,7 @@ class LutronTelnetConnection:
 
         _LOGGER.debug("Querying zone %s level", zone_id)
 
-        response = await self.send_command(command)
+        response = await self.send_command(command, expected_zone=zone_id)
 
         # Expected response: ~OUTPUT,25,1,75.00
         if response and response.startswith("~OUTPUT"):
