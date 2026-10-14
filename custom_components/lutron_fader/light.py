@@ -339,11 +339,15 @@ class LutronFaderLight(LightEntity):
 
         # If we have a zone_id, query the actual state from Lutron
         elif self._zone_id is not None:
-            level = await self._connection.query_light_level(self._zone_id)
-            if level is not None:
-                # Convert from 0-100 to 0-255
-                self._attr_brightness = int((level / 100.0) * 255)
-                self._attr_is_on = level > 0
+            try:
+                level = await self._connection.query_light_level(self._zone_id)
+            except HomeAssistantError as err:
+                # Keep the last known state; availability reflects the link
+                _LOGGER.debug("Could not refresh zone %s: %s", self._zone_id, err)
+                return
+            # Convert from 0-100 to 0-255
+            self._attr_brightness = int((level / 100.0) * 255)
+            self._attr_is_on = level > 0
 
     @property
     def is_on(self) -> bool:
@@ -390,13 +394,11 @@ class LutronFaderLight(LightEntity):
         if fade_time > 0:
             self._fade_target_lutron = float(send_level)
 
-        success = await self._connection.set_light_level(self._zone_id, send_level, fade_time)
-
-        if not success:
+        try:
+            await self._connection.set_light_level(self._zone_id, send_level, fade_time)
+        except HomeAssistantError:
             self._fade_target_lutron = None
-            raise HomeAssistantError(
-                f"Lutron hub did not acknowledge command for zone {self._zone_id}"
-            )
+            raise
 
         if fade_time > 0 and self._fade_target_lutron is None:
             # An external change (Pico, app) arrived while we awaited the ack and
@@ -444,13 +446,11 @@ class LutronFaderLight(LightEntity):
         if fade_time > 0:
             self._fade_target_lutron = 0.0
 
-        success = await self._connection.set_light_level(self._zone_id, 0, fade_time)
-
-        if not success:
+        try:
+            await self._connection.set_light_level(self._zone_id, 0, fade_time)
+        except HomeAssistantError:
             self._fade_target_lutron = None
-            raise HomeAssistantError(
-                f"Lutron hub did not acknowledge command for zone {self._zone_id}"
-            )
+            raise
 
         if fade_time > 0 and self._fade_target_lutron is None:
             # Overridden externally while awaiting the ack (see async_turn_on)

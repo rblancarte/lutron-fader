@@ -50,10 +50,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         ping_zone=data.get("ping_zone", 1),
     )
 
-    if not await connection.connect():
-        raise CannotConnect
-
-    await connection.disconnect()
+    try:
+        if not await connection.connect():
+            raise CannotConnect
+    finally:
+        # Always stop the manager, or a failed check would keep retrying
+        await connection.disconnect()
 
     return {"title": f"Lutron Fader ({data[CONF_HOST]})"}
 

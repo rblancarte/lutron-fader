@@ -89,6 +89,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     _LOGGER.info("Testing connection to Lutron hub at %s", conf[CONF_HOST])
     if not await connection.connect():
         _LOGGER.error("Failed to connect to Lutron hub at %s", conf[CONF_HOST])
+        await connection.disconnect()  # stop the background retries
         return False
     
     # Stay connected so push updates (Pico, app) flow from boot
@@ -264,11 +265,7 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
         if connection is None:
             raise HomeAssistantError("Lutron Fader has no hub connection")
 
-        success = await connection.set_light_level(zone_id, brightness, fade_time)
-        if not success:
-            raise HomeAssistantError(
-                f"Lutron hub did not acknowledge fade command for zone {zone_id}"
-            )
+        await connection.set_light_level(zone_id, brightness, fade_time)
 
     async def handle_discover_lutron_entities(call: ServiceCall) -> None:
         """Discover Lutron Caseta entities from the official integration."""
