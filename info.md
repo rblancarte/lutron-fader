@@ -1,55 +1,30 @@
 # Lutron Fader
 
-Extended fade time support for Lutron Caseta Pro lights via direct Telnet control.
+See the **progress of native fades** on your Lutron lights.
+
+Lutron hubs fade lights in hardware, but report only the fade's *target*. Start a 30-minute fade and Home Assistant shows the end brightness straight away. Lutron Fader watches for fades you start from Home Assistant and publishes each one's progress as a sensor.
 
 ## Features
 
-- **Long Fade Times** - Fade lights over minutes or hours (up to 2 hours), not limited by standard Home Assistant transition times
-- **Hardware-Accelerated Fading** - Uses native Lutron dimming for smooth, reliable transitions
-- **Custom Lovelace Card** - Included card with brightness slider and fade time controls
-- **Direct Telnet Control** - Uses Lutron Integration Protocol (LIP) for professional-grade control
-- **Auto-Discovery** - Automatically discover and configure lights from Integration Report
-- **Config Flow** - Easy UI-based setup, no YAML required
+- A `sensor.<light>_fade` for every dimmable Lutron light: `idle` or `fading`, with live brightness, target, end time and percent complete
+- Tracks fades from dashboards, automations, scripts and voice, including area and device targets
+- Ends a tracked fade as soon as it's overridden (a Pico, the app, a new command)
+- Resumes its countdown after a Home Assistant restart
+- Zero configuration: lights are found automatically
 
 ## Requirements
 
-- Lutron Caseta Pro Smart Bridge (L-BDGPRO2-WH), RadioRA 2 Select, or HomeWorks QS/QSX
-- Telnet/LIP support enabled on your Lutron hub
-- Home Assistant 2023.1 or newer
-
-**Note:** Standard Caseta bridges (non-Pro) are not supported as they lack Telnet access.
+- Home Assistant 2026.10+
+- Lutron lights from the official **Lutron Caseta** integration (any Smart Bridge), the official **Lutron** (RadioRA 2) integration, or **lutron_caseta_pro**
 
 ## Quick Start
 
-1. Install via HACS
-2. Add integration via UI (Settings → Devices & Services → Add Integration)
-3. Enter your Lutron hub IP address
-4. Run `auto_configure_from_report` service with your Integration Report
-5. Download `lutron-fader-card.js` from the [lutron-fader-card repo](https://github.com/rblancarte/lutron-fader-card), copy to `config/www/`, then add it as a Lovelace resource at `/local/lutron-fader-card.js`
-6. Start creating long fades!
+1. Install via HACS and restart Home Assistant
+2. **Settings → Devices & services → Add Integration → Lutron Fader**
+3. Fade a light with `light.turn_on` + `transition`, then watch its `sensor.<light>_fade`
 
-## Usage
+## Upgrading from 1.x
 
-Use the `lutron_fader.fade_to` service for smooth fades:
+1.x drove lights over Telnet. 2.0 migrates automatically and removes the old `light.lutron_zone_*` entities. Point automations and cards at the official Lutron lights.
 
-```yaml
-service: lutron_fader.fade_to
-data:
-  entity_id: light.bedroom_lamp
-  brightness: 0
-  fade_time: 1800  # 30 minutes
-```
-
-Or use the custom Lovelace card for visual control with a fade time slider.
-
-## Perfect For
-
-- 🌅 Sunrise/sunset simulations
-- 😴 Bedtime routines
-- 🎬 Movie mode transitions
-- 🎨 Mood lighting scenes
-- ⏰ Wake-up automations
-
----
-
-[Full Documentation](https://github.com/rblancarte/lutron-fader) | [Report Issues](https://github.com/rblancarte/lutron-fader/issues)
+See the [README](https://github.com/rblancarte/lutron-fader) for the full sensor reference, examples and troubleshooting.

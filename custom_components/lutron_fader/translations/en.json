@@ -1,0 +1,24 @@
+{
+  "title": "Lutron Fader",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Lutron Fader",
+        "description": "Shows the progress of fades on your Lutron lights. It adds a fade sensor for every dimmable Lutron light; nothing else to configure."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Lutron Fader is already set up."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "fade": {
+        "state": {
+          "idle": "Idle",
+          "fading": "Fading"
+        }
+      }
+    }
+  }
+}

@@ -1,331 +1,150 @@
 # Lutron Fader
 
-A Home Assistant custom integration that adds extended fade time support to Lutron lights via direct Telnet communication using the Lutron Integration Protocol (LIP).
+A Home Assistant custom integration that shows the **progress of native fades** on Lutron lights.
 
 ## Why This Integration?
 
-The standard Lutron Caseta integration provides excellent support for features exposed through the Lutron Caseta app. However, owners of professional-grade Lutron hardware have access to powerful extended features that aren't typically exposed to users. These systems expose the **Lutron Integration Protocol (LIP)** over a direct Telnet connection — an openly documented, line-based text protocol that gives you full zone control including hardware-native fade times.
+Lutron dimmers fade beautifully in hardware: smoother and more reliable than software that steps the brightness every few seconds. Home Assistant's official Lutron Caseta integration can already ask for those fades. `light.turn_on` with a `transition` sends a native fade over Lutron's LEAP API, and long fades (minutes to hours) work.
 
-**Supported systems (per Lutron ICD 040249):**
+What's missing is **seeing the fade happen**. The hub reports only the fade's *target*, never the level along the way. So the moment a 30-minute fade starts, Home Assistant shows the light at its end brightness. Dashboards, automations and you have no idea where the fade actually is or when it will finish.
 
-| System | Integration Access Point | Telnet Port |
-|--------|--------------------------|-------------|
-| Caseta Pro Smart Bridge ⁺ | L-BDGPRO2-WH | 23 |
-| RadioRA 2 | Main Repeater (RR-MAIN-REP-WH / RRK-MAIN-REP-WH) | Configurable in software |
-| HomeWorks QS | HomeWorks QS Processor | — |
-| Quantum | QSE-CI-NWK-E | 23 |
-| Athena | QSE-CI-NWK-E | 23 |
-| QS Standalone | QSE-CI-NWK-E | 23 |
-| myRoom Plus | GCU-HOSP Processor | — |
-
-> ⁺ Caseta Pro (L-BDGPRO2-WH) supports Telnet and the LIP command set in practice, but is not documented in Lutron ICD 040249 — use at your own discretion. Standard non-Pro Caseta (L-BDG2-WH) does **not** support LIP.
-
-### The Power of Native Dimming
-
-Smart dimming products like the Lamp Dimming Smart Plug (PD-3PCL-WH), Smart Dimmer Switch (PD-5NE), and Diva Smart Dimmer Switch (DVRF-6L) support hardware-level dimming. When you leverage this native capability, fades are smoother, more reliable, and far more elegant than software-based solutions that repeatedly send brightness commands.
-
-Previously, accessing these native fade capabilities required manually telnetting into the system or running command-line scripts—not exactly user-friendly!
-
-### What This Integration Does
-
-Lutron Fader brings these professional features directly into Home Assistant's ecosystem, making them as easy to use as any other automation:
-
-- **Select any Lutron light**
-- **Specify your desired brightness level** (0-100%)
-- **Set how long the fade should take** (seconds to hours)
-- **Press a button** and watch as your lights smoothly transition over the exact duration you specified
-
-All of this happens through a single service call—no manual dimming, no multiple commands, just smooth, hardware-accelerated fading that works exactly as you'd expect from professional lighting control systems.
+Lutron Fader fills that gap. It never talks to the hub and never sends commands. It watches Home Assistant for fades sent to your Lutron lights, works out where each fade is, and publishes it as a sensor per light.
 
 ## Features
 
-- 🌅 **Long fade times** - Fade lights over minutes or hours (not limited by standard HA transition times)
-- 🔌 **Direct Telnet control** - Bypasses standard integration limits using Lutron Integration Protocol (LIP)
-- 🎛️ **Custom service** - `lutron_fader.fade_to` with extended fade time support
-- 💡 **Standard HA light control** - `light.turn_on` / `light.turn_off` with `transition:` works natively
-- 📡 **Real-time push updates** - Persistent connection with background reader; Pico button presses and app changes update HA state instantly without polling
-- 📊 **Live brightness tracking** - HA brightness attribute updates every second during an active fade so dashboards and automations see the actual dimmer position
-- 🔄 **Connection management** - Persistent keep-alive ping with automatic reconnect on drop
+- 📈 **Live fade progress**: a `sensor.<light>_fade` for every dimmable Lutron light, with the current calculated brightness, start and target, start and end times, and percent complete
+- 🎯 **Works with every way you start a fade**: dashboards, automations, scripts, voice. Targets by entity, area, device or floor are all resolved to the lights involved.
+- ✋ **Knows when a fade is overridden**: a Pico press, the Lutron app, or a new command ends the tracked fade at once
+- 🔁 **Survives restarts**: a fade in progress picks up its countdown after Home Assistant restarts
+- 🧩 **Zero configuration**: one click to add; lights are found automatically, including ones added later
+- 🪶 **Light on your database**: the per-second attributes are kept out of the recorder
 
 ## Requirements
 
-- Home Assistant 2023.1 or newer
-- A Lutron system that supports LIP over Telnet: Caseta Pro Smart Bridge (L-BDGPRO2-WH), RadioRA 2 Main Repeater, HomeWorks QS Processor, Quantum, Athena, QS Standalone, or myRoom Plus
-- Telnet/LIP integration enabled on the hub
+- Home Assistant **2026.10** or newer
+- Lutron lights in Home Assistant from one of:
+  - the official **Lutron Caseta** integration (any Smart Bridge; the Pro model is *not* required)
+  - the official **Lutron** integration (RadioRA 2)
+  - the **lutron_caseta_pro** custom integration
+
+Only lights that can **dim** and support **transitions** get a fade sensor. On/off-only loads have nothing to fade.
 
 ## Installation
 
-### Via HACS (Coming Soon)
-1. Open HACS
-2. Go to Integrations
-3. Search for "Lutron Fader"
-4. Click Install
+### Via HACS (custom repository)
+1. In HACS, open the ⋮ menu → **Custom repositories**
+2. Add `https://github.com/rblancarte/lutron-fader` with category **Integration**
+3. Install **Lutron Fader** and restart Home Assistant
 
 ### Manual Installation
 1. Download the latest release from GitHub
-2. Copy the `custom_components/lutron_fader` folder to your Home Assistant `custom_components` directory
+2. Copy `custom_components/lutron_fader` into your Home Assistant `config/custom_components/` folder
 3. Restart Home Assistant
 
-## Configuration
+### Setup
+**Settings → Devices & services → Add Integration → Lutron Fader → Submit.** That's all: there's nothing to configure.
 
-### Option 1: UI Configuration (Recommended)
-1. Go to Settings > Devices & Services
-2. Click "+ Add Integration"
-3. Search for "Lutron Fader"
-4. Enter your Lutron hub details:
-   - **Host**: Your Caseta Pro hub IP address (e.g., `10.0.1.111`)
-   - **Port**: Default is `23`
-   - **Username**: Default is `lutron`
-   - **Password**: Default is `integration`
+## The Fade Sensors
 
-### Option 2: YAML Configuration
-Add to your `configuration.yaml`:
-```yaml
-lutron_fader:
-  host: 10.0.1.111  # Your Caseta Pro hub IP address
-  port: 23          # Default Telnet port
-  username: lutron  # Default username
-  password: integration  # Default password
+Each tracked light gets a sensor whose ID mirrors the light's: `light.living_room_floor_lamp` → `sensor.living_room_floor_lamp_fade`. The sensor sits on the light's own device page.
+
+**State:** `idle` or `fading`
+
+**Attributes:**
+
+| Attribute | When | Meaning |
+|---|---|---|
+| `light_entity_id` | always | The light this sensor tracks |
+| `brightness` | fading | Calculated current brightness (0–255) |
+| `brightness_pct` | fading | Calculated current brightness (0–100%) |
+| `start_pct` | fading | Brightness when the fade began |
+| `target_pct` | fading | Brightness the fade is heading to |
+| `started_at` | fading | When the fade began (ISO time, UTC) |
+| `ends_at` | fading | When the fade will finish (ISO time, UTC) |
+| `progress` | fading | Percent complete (0–100) |
+
+### How a fade is tracked
+
+```
+light.turn_on / turn_off with transition ──▶ Pending ──light reports its new target──▶ Fading
+                                                │                                    │
+                         already there, or no report within 5s       ends_at reached, or the light
+                                                ▼                    changes to anything else
+                                              Idle ◀─────────────────────────────────┘
 ```
 
-Then restart Home Assistant.
+The fade's target is taken from what the light itself reports right after the command, so every form of command works: `brightness`, `brightness_pct`, a bare `turn_on`, or `turn_off`. A new fade started partway through a fade begins from the calculated level, not from the target Home Assistant was showing.
 
-## Finding Your Zone IDs
+## Examples
 
-To find the zone ID for your lights:
-
-1. Enable Telnet on your Lutron hub (Lutron App > Settings > Advanced > Integration)
-2. Use the Lutron app to view your Integration Report:
-   - Go to Settings > Advanced > Integration
-   - Tap "Send Integration Report"
-   - Copy to clipboard or email to yourself
-3. Zone IDs are listed in the report under "Zones"
-
-## Custom Lovelace Card
-
-A companion Lovelace card is available as a separate download from the [lutron-fader-card](https://github.com/rblancarte/lutron-fader-card) repository.
-
-### Installing the Card
-
-1. Download `lutron-fader-card.js` from the [lutron-fader-card releases](https://github.com/rblancarte/lutron-fader-card)
-2. Copy it to your Home Assistant `config/www/` directory
-3. Go to **Settings → Dashboards → Resources** (☰ menu → Resources)
-4. Click **"+ Add Resource"**
-5. Enter:
-   - URL: `/local/lutron-fader-card.js`
-   - Resource type: **JavaScript Module**
-6. Click "Create"
-7. Refresh your browser (Ctrl+F5 or Cmd+Shift+R)
-
-### Using the Card
-
-Add to your dashboard in YAML mode:
-
+### Start a fade (nothing new: standard Home Assistant)
 ```yaml
-type: custom:lutron-fader-card
-entity: light.living_room_floor_lamp
-```
-
-Or use the visual editor:
-1. Edit your dashboard
-2. Click "+ Add Card"
-3. Search for "Lutron Fader Card"
-4. Select your entity
-
-### Card Features
-
-- **Current State Display**: Shows ON/OFF status and current brightness
-- **Brightness Slider**: Select desired brightness (0-100%)
-- **Fade Time Input**: Enter fade duration (0-14400 seconds)
-- **Start Fade Button**: Execute the fade to selected brightness
-- **Turn Off Button**: Turn off light with specified fade time
-- **Input Validation**: Ensures fade time is within valid range
-
-### Dashboard Examples
-
-For complete dashboard configuration examples, see the [examples/](examples/) folder:
-- Single and multiple card layouts
-- Grid and vertical stack arrangements
-- Auto-entities configurations
-- Full page dashboard templates
-
-## Usage
-
-### Standard HA Light Control (Recommended)
-
-Lutron Fader entities appear as standard HA lights and support the `transition` parameter natively:
-
-```yaml
-service: light.turn_off
+action: light.turn_on
 target:
-  entity_id: light.lutron_zone_5
-data:
-  transition: 1800  # 30 minutes
-```
-
-```yaml
-service: light.turn_on
-target:
-  entity_id: light.lutron_zone_5
-data:
-  brightness: 255
-  transition: 900  # 15 minutes
-```
-
-HA brightness updates every second during the fade so dashboards stay in sync.
-
-### Service: `lutron_fader.fade_to`
-
-Fade a light to a specific brightness over time. Supports fade times from 0 to 14400 seconds (4 hours):
-
-```yaml
-service: lutron_fader.fade_to
-data:
-  zone_id: 28
-  brightness: 50    # 0-100%
-  fade_time: 1800   # 30 minutes in seconds
-```
-
-You can also use entity_id instead of zone_id (requires running `auto_configure_from_report` first):
-
-```yaml
-service: lutron_fader.fade_to
-data:
   entity_id: light.master_bedroom_ron_lamp
-  brightness: 0     # Turn off
-  fade_time: 3600   # 1 hour (max is 14400 = 4 hours)
+data:
+  brightness_pct: 100
+  transition: 1800   # 30 minutes
 ```
 
-## Example Automations
-
-### Sunrise Simulation
-Wake up gently with a 30-minute sunrise:
+### Do something when a fade finishes
 ```yaml
 automation:
-  - alias: "Wake Up - Sunrise Simulation"
-    trigger:
-      - platform: time
-        at: "06:00:00"
-    action:
-      - service: lutron_fader.fade_to
+  - alias: "Sunrise fade done"
+    triggers:
+      - trigger: state
+        entity_id: sensor.master_bedroom_ron_lamp_fade
+        from: "fading"
+        to: "idle"
+    actions:
+      - action: notify.mobile_app_phone
         data:
-          zone_id: 28
-          brightness: 100
-          fade_time: 1800  # 30 minutes
+          message: "Bedroom lamp has finished fading."
+```
+`idle` also follows an override (for example, someone pressing the Pico). Add a condition on the light's brightness if you only want fades that ran to the end.
+
+### Minutes left, as a template
+```jinja
+{% set ends = state_attr('sensor.master_bedroom_ron_lamp_fade', 'ends_at') %}
+{{ ((as_datetime(ends) - now()).total_seconds() / 60) | round(0) if ends else 0 }}
 ```
 
-### Sunset Simulation
-Gradually dim lights for bedtime:
-```yaml
-automation:
-  - alias: "Bedtime - Sunset Simulation"
-    trigger:
-      - platform: time
-        at: "21:30:00"
-    action:
-      - service: lutron_fader.fade_to
-        data:
-          zone_id: 28
-          brightness: 0
-          fade_time: 1800  # 30 minutes
-```
-
-### Multiple Lights Simultaneously
-Fade multiple lights at the same time:
-```yaml
-automation:
-  - alias: "Bedroom Lights - Fade Off"
-    trigger:
-      - platform: time
-        at: "22:00:00"
-    action:
-      - service: lutron_fader.fade_to
-        data:
-          zone_id: 25
-          brightness: 0
-          fade_time: 900  # 15 minutes
-      - service: lutron_fader.fade_to
-        data:
-          zone_id: 34
-          brightness: 0
-          fade_time: 900  # 15 minutes
-```
-
-### Button to Trigger Fade
-Create a script and button for one-touch fading:
-```yaml
-script:
-  bedroom_sleep_mode:
-    alias: "Bedroom Sleep Mode"
-    sequence:
-      - service: lutron_fader.fade_to
-        data:
-          zone_id: 25
-          brightness: 0
-          fade_time: 900
-      - service: lutron_fader.fade_to
-        data:
-          zone_id: 34
-          brightness: 0
-          fade_time: 900
-```
-
-Then add a button card to your dashboard:
-```yaml
-type: button
-name: Sleep Mode
-icon: mdi:sleep
-tap_action:
-  action: call-service
-  service: script.turn_on
-  target:
-    entity_id: script.bedroom_sleep_mode
-```
+### Companion card
+The [Lutron Fader Card](https://github.com/rblancarte/lutron-fader-card) gives a dashboard control for starting fades of any length. Point it at the **official** Lutron light (for example `light.living_room_floor_lamp`).
 
 ## Known Limitations
 
-- Requires a Lutron system with LIP/Telnet support — see the supported systems table in the Why This Integration? section
-- Standard Caseta bridge (L-BDG2-WH) is **not supported** — does not expose LIP over Telnet
-- Zone IDs must be manually configured (auto-discovery coming soon)
-- Shades do not support extended fade times (they move at fixed motor speed)
+- **Fades started outside Home Assistant aren't tracked.** For a fade from the Lutron app, a Pico or a scene on the hub, Home Assistant only ever hears the target. The light still updates; there's just no fade sensor activity.
+- **The progress is calculated, not measured.** No Lutron API reports the in-between level, so the sensor assumes an even fade from start to target over the requested time.
+- Lights that can't dim, or don't support transitions, aren't tracked.
+
+## Upgrading from 1.x
+
+Version 1.x controlled lights itself over a Telnet connection to the hub. 2.0 replaces that entirely:
+
+- Your existing setup migrates automatically on restart. The old `light.lutron_zone_*` entities are removed.
+- Point automations, scripts and cards at the **official** Lutron lights instead. Use `light.turn_on` with `transition` in place of the old `lutron_fader.fade_to` service.
+- If a fade sensor's entity ID comes out with its area doubled (for example `sensor.bedroom_bedroom_lamp_fade`), open the sensor's settings and press **↻** next to the entity ID.
 
 ## Troubleshooting
 
-### Integration doesn't appear after installation
-1. Verify files are in `/config/custom_components/lutron_fader/`
-2. Check Home Assistant logs for errors (Settings > System > Logs)
-3. Restart Home Assistant
+### No fade sensors appear
+1. Check that your lights come from a supported integration (see Requirements) and are dimmable
+2. Check the logs (Settings → System → Logs) for `custom_components.lutron_fader`
+3. For more detail, add this to `configuration.yaml`:
+   ```yaml
+   logger:
+     logs:
+       custom_components.lutron_fader: debug
+   ```
 
-### Connection fails
-1. Verify Telnet is enabled on your Lutron hub (Lutron App > Settings > Advanced > Integration)
-2. Confirm the IP address is correct
-3. Test Telnet connection: `telnet <hub_ip> 23`
-4. Ensure hub is on the same network as Home Assistant
-
-### Services don't appear
-1. Check Home Assistant logs for errors during startup
-2. Verify `services.yaml` is present in the integration folder
-3. Try reloading "Groups, group entities, and notify services" in Developer Tools > YAML
+### A fade doesn't show as fading
+1. Make sure the command included `transition` and was sent from Home Assistant
+2. With debug logging on, look for `fade requested` and `Pending(...) -> Fading(...)` lines
 
 ## Development
 
-This integration is under active development. Contributions are welcome!
-
-### Implemented
-- Config flow (hub credentials + Integration Report paste → zones created automatically)
-- Zone discovery via `auto_configure_from_report` service (user-initiated, report paste)
-- Custom Lovelace card with fade controls
-- Persistent Telnet connection with background reader loop
-- Real-time push state updates (Pico/app changes reflected instantly)
-- Live brightness interpolation during active fades
-- Standard `light.turn_on/off` with `transition:` support
-- Hardware fade via correct LIP `HH:MM:SS` time format
-- Unit tests (89 passing)
-
-### To-Do
-- [ ] Automatic light discovery — query the hub directly during setup, no report paste required
-- [ ] HACS integration
-- [ ] Multi-zone fade service
+The integration's tests live in the [lutron-fader-dev](https://github.com/rblancarte/lutron-fader-dev) workspace. They run against a real Home Assistant using `pytest-homeassistant-custom-component`.
 
 ## Contributing
 
@@ -339,7 +158,7 @@ This project is licensed under the Apache 2.0 License - see the LICENSE file for
 
 Created by [rblancarte](https://github.com/rblancarte)
 
-Built with inspiration from the Home Assistant community and the Lutron Integration Protocol documentation.
+Built with inspiration from the Home Assistant community.
 
 ## Disclaimer
 

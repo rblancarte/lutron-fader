@@ -3,58 +3,20 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure Lutron Fader",
-        "description": "Connect to your Lutron hub via Telnet to enable fade time support.",
-        "data": {
-          "host": "Hub IP Address",
-          "port": "Port",
-          "username": "Username",
-          "password": "Password",
-          "ping_zone": "Ping Zone (for keep-alive)"
-        },
-        "data_description": {
-          "ping_zone": "Zone ID to use for connection keep-alive pings (default: 1)"
-        }
-      },
-      "report": {
-        "title": "Paste Integration Report",
-        "description": "Paste your Lutron Integration Report to discover your zones automatically. In the Lutron app, go to Settings → Advanced → Integration → Send Integration Report, then copy and paste the full report text below.\n\nLeave blank to skip — you can configure zones later using the `lutron_fader.auto_configure_from_report` service.",
-        "data": {
-          "report_text": "Integration Report"
-        }
+        "title": "Lutron Fader",
+        "description": "Shows the progress of fades on your Lutron lights. It adds a fade sensor for every dimmable Lutron light; nothing else to configure."
       }
-    },
-    "error": {
-      "cannot_connect": "Failed to connect to Lutron hub",
-      "unknown": "Unexpected error",
-      "report_parse_failed": "Could not find any zones in the report. Check that you pasted the full report text and try again."
     },
     "abort": {
-      "already_configured": "Lutron Fader is already configured for this hub"
+      "single_instance_allowed": "Lutron Fader is already set up."
     }
   },
-  "services": {
-    "fade_light": {
-      "name": "Fade Light",
-      "description": "Fade a Lutron light to a target brightness over a specified duration.",
-      "fields": {
-        "target_brightness_pct": {
-          "name": "Target Brightness",
-          "description": "Target brightness level (0-100%)"
-        },
-        "duration_seconds": {
-          "name": "Duration",
-          "description": "Fade duration in seconds"
-        }
-      }
-    },
-    "parse_integration_report": {
-      "name": "Parse Integration Report",
-      "description": "Parse a Lutron Integration Report and generate zone mappings configuration.",
-      "fields": {
-        "report_text": {
-          "name": "Integration Report",
-          "description": "Paste the full Integration Report text from the Lutron app"
+  "entity": {
+    "sensor": {
+      "fade": {
+        "state": {
+          "idle": "Idle",
+          "fading": "Fading"
         }
       }
     }

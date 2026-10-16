@@ -1,33 +1,9 @@
 """Constants for the Lutron Fader integration."""
 
-# Integration domain
 DOMAIN = "lutron_fader"
 
-# Configuration keys
-CONF_HOST = "host"
-CONF_PORT = "port"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
-CONF_ZONE_MAPPINGS = "zone_mappings"
-
-# Default values
-DEFAULT_PORT = 23
-DEFAULT_USERNAME = "lutron"
-DEFAULT_PASSWORD = "integration"
-
-# Service names
-SERVICE_FADE_TO = "fade_to"
-SERVICE_PARSE_REPORT = "parse_integration_report"
-SERVICE_DISCOVER_ENTITIES = "discover_lutron_entities"
-SERVICE_AUTO_CONFIGURE = "auto_configure_from_report"
-
-# Service parameters / Attributes
-ATTR_ZONE_ID = "zone_id"
-ATTR_ENTITY_ID = "entity_id"
-ATTR_BRIGHTNESS = "brightness"
-ATTR_FADE_TIME = "fade_time"
-ATTR_REPORT_TEXT = "report_text"
-
-# Platforms
-PLATFORMS = ["light"]
-
+# Fade tracking
+TRACKED_PLATFORMS = ("lutron_caseta", "lutron_caseta_pro", "lutron")  # light platforms to track
+PENDING_TIMEOUT = 5   # seconds to wait for a light to report a requested fade's target
+TICK_INTERVAL = 1     # seconds between sensor updates while a fade runs
+ECHO_TOLERANCE = 3    # brightness units (0-255) within which a reported level matches
