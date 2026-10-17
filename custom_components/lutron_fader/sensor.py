@@ -8,10 +8,21 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN, STATE_OFF
-from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
+from homeassistant.core import (
+    Event,
+    EventStateChangedData,
+    EventStateReportedData,
+    HomeAssistant,
+    State,
+    callback,
+)
 from homeassistant.helpers.device import async_entity_id_to_device
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_state_report_event,
+    async_track_time_interval,
+)
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.util import dt as dt_util
 
@@ -116,6 +127,10 @@ class FadeSensor(SensorEntity, RestoreEntity):
         self.async_on_remove(
             async_track_state_change_event(self.hass, [self.light_entity_id], self._on_light_changed)
         )
+        # Unchanged re-reports matter too: see FadeTracker.on_light_report
+        self.async_on_remove(
+            async_track_state_report_event(self.hass, [self.light_entity_id], self._on_light_reported)
+        )
 
     async def async_will_remove_from_hass(self) -> None:
         self._stop_tick()
@@ -145,6 +160,19 @@ class FadeSensor(SensorEntity, RestoreEntity):
                 "%s: %s -> %s (light now %s, context %s)",
                 self.light_entity_id, before, self._tracker.state, level,
                 new_state.context.id if new_state else None,
+            )
+            self._sync_tick()
+            self.async_write_ha_state()
+
+    @callback
+    def _on_light_reported(self, event: Event[EventStateReportedData]) -> None:
+        if not self._tracker.fading:
+            return
+        new_state = event.data["new_state"]
+        if self._tracker.on_light_report(light_level(new_state), dt_util.utcnow()):
+            _LOGGER.debug(
+                "%s: light re-reported its target (context %s); fade overridden",
+                self.light_entity_id, new_state.context.id if new_state else None,
             )
             self._sync_tick()
             self.async_write_ha_state()

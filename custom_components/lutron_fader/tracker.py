@@ -11,6 +11,8 @@ level along the way.
     Pending ──light already there, or no change within the timeout──▶ Idle
     Fading ──now ≥ ends_at──▶ Idle
     Fading ──light changes to ≠ target, or unavailable (override)──▶ Idle
+    Fading ──light re-reports its target after the grace period──▶ Idle
+            (something set it to the fade's target, e.g. a Pico button)
     Fading ──new call with transition──▶ Pending(start = current calculated level)
 
 No Home Assistant imports, so it can be tested on its own. Levels are HA
@@ -23,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from .const import ECHO_TOLERANCE, PENDING_TIMEOUT
+from .const import ECHO_TOLERANCE, PENDING_TIMEOUT, REPORT_GRACE
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,24 @@ class FadeTracker:
             return False
         # Anything else is an override (Pico, app, keypad, instant command)
         return self._transition(Idle())
+
+    def on_light_report(self, level: float | None, now: datetime) -> bool:
+        """The light re-reported its state without changing it.
+
+        During a fade Home Assistant already shows the target, so an outside
+        command that sets the light to exactly that level (a Pico "on" during a
+        fade up, "off" during a fade down) changes nothing and only arrives as
+        a report. A report shortly after the fade starts is the hub repeating
+        the command, so it's ignored.
+        """
+        state = self._state
+        if not isinstance(state, Fading) or level is None:
+            return False
+        if (now - state.started_at).total_seconds() < REPORT_GRACE:
+            return False
+        if abs(level - state.target) <= ECHO_TOLERANCE:
+            return self._transition(Idle())
+        return False
 
     def on_tick(self, now: datetime) -> bool:
         """Periodic check: end a fade that has run its course, or a stale Pending."""
